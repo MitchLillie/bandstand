@@ -152,6 +152,26 @@ const client = await BandClient.create({
 });
 ```
 
+## Browser / extension usage
+
+The core `BandClient` is runtime-agnostic (Web `fetch` + Web Crypto), so it also runs
+in a browser extension or service worker. Import the browser-safe entry — `bandstand/browser`,
+which omits the Node `FileCookieStore` (and its `node:fs` import) — and use **browser
+mode**: the runtime owns the cookie jar, so you only supply `secretKey` (read it via
+`chrome.cookies`, since it's HttpOnly) and let `fetch` attach the session cookie.
+
+```ts
+import { BandClient } from "bandstand/browser";
+
+const [{ value: secretKey }] = await chrome.cookies.getAll({ name: "secretKey" });
+const client = await BandClient.create({
+  cookies: { secretKey },
+  sendCookieHeader: false, // `Cookie` is a forbidden header in browsers
+  credentials: "include",  // let the browser attach band.us session cookies
+});
+await client.getCalendars(bandNo);
+```
+
 ## Browser-native traffic posture
 
 To look like a normal browser to BAND, the client:

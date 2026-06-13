@@ -118,3 +118,34 @@ describe("BandClient request pipeline", () => {
     expect(captured).toContain(encodeURIComponent("4/103117926/1/19700101"));
   });
 });
+
+describe("browser mode (sendCookieHeader: false)", () => {
+  it("works with only secretKey, omits the Cookie header, and sets credentials", async () => {
+    let init: RequestInit | undefined;
+    const fetchImpl = (async (_url: string | URL, opts?: RequestInit) => {
+      init = opts;
+      return jsonResponse({ result_code: 1, result_data: { internal_calendars: [] } });
+    }) as typeof fetch;
+
+    // No band_session — the browser would supply it ambiently.
+    const client = await BandClient.create({
+      cookies: { secretKey: '"key"' },
+      sendCookieHeader: false,
+      credentials: "include",
+      fetch: fetchImpl,
+      jitterMs: null,
+    });
+    await client.getCalendars(42);
+
+    const headers = init?.headers as Record<string, string>;
+    expect(headers.md).toMatch(/=$/); // still signed
+    expect(headers.cookie).toBeUndefined(); // Cookie header omitted
+    expect(init?.credentials).toBe("include");
+  });
+
+  it("still requires band_session when sendCookieHeader is true (default)", async () => {
+    await expect(BandClient.create({ cookies: { secretKey: "k" } })).rejects.toBeInstanceOf(
+      AuthError,
+    );
+  });
+});

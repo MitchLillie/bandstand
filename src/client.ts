@@ -51,6 +51,15 @@ export interface BandClientOptions {
   now?: () => number;
   /** Injectable sleep. Defaults to `setTimeout`. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Send a `Cookie` header built from the jar. Default `true` (Node). In a browser
+   * set this `false`: `Cookie` is a forbidden header there, and the runtime attaches
+   * session cookies itself via {@link credentials}. In that mode only `secretKey` is
+   * required (to sign); `band_session` is supplied ambiently by the browser.
+   */
+  sendCookieHeader?: boolean;
+  /** `credentials` mode passed to `fetch` — e.g. `"include"` in a browser extension. */
+  credentials?: RequestCredentials;
 }
 
 interface ResolvedConfig {
@@ -65,6 +74,8 @@ interface ResolvedConfig {
   warmUp: boolean;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
+  sendCookieHeader: boolean;
+  credentials: RequestCredentials | undefined;
 }
 
 const AUTH_HINTS = ["auth", "login", "session", "token", "unauth"];
@@ -109,7 +120,8 @@ export class BandClient {
       typeof options.cookies === "string" ? parseCookieHeader(options.cookies) : options.cookies;
     Object.assign(jar, seed ?? {});
 
-    if (!jar.band_session) {
+    const sendCookieHeader = options.sendCookieHeader ?? true;
+    if (sendCookieHeader && !jar.band_session) {
       throw new AuthError("no band_session on file");
     }
     const secret = extractSecret(jar);
@@ -134,6 +146,8 @@ export class BandClient {
       warmUp: options.warmUp ?? true,
       now: options.now ?? Date.now,
       sleep: options.sleep ?? defaultSleep,
+      sendCookieHeader,
+      credentials: options.credentials,
     };
 
     await store.save(jar);
@@ -196,9 +210,13 @@ export class BandClient {
     const headers: Record<string, string> = {
       ...this.appHeaders(),
       md: await signPath(this.hmacKey, url, this.cfg.crypto),
-      cookie: serializeCookieHeader(this.jar),
     };
+    // In a browser `Cookie` is forbidden; the runtime sends cookies via `credentials`.
+    if (this.cfg.sendCookieHeader) {
+      headers.cookie = serializeCookieHeader(this.jar);
+    }
     const init: RequestInit = { method, headers };
+    if (this.cfg.credentials) init.credentials = this.cfg.credentials;
     if (method === "POST") {
       headers["content-type"] = "application/x-www-form-urlencoded; charset=UTF-8";
       const form = new URLSearchParams();
