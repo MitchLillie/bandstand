@@ -15,8 +15,8 @@
     "node": ">=20"
   },
   "bin": {
-    "bandstand": "./dist/cli.js",
-    "bs": "./dist/cli.js"
+    "bandstand": "dist/cli.js",
+    "bs": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "module": "./dist/index.js",
