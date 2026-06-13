@@ -116,3 +116,7 @@ export interface CreateScheduleResult {
 }
 
 export type RecurringEditType = "ALL" | "THIS" | "THIS_AND_FUTURE";
+
+export interface DeleteScheduleResult {
+  message?: string;
+}

@@ -36,6 +36,7 @@ export type {
   CalendarRef,
   CalendarsResult,
   CreateScheduleResult,
+  DeleteScheduleResult,
   Member,
   MemberGroup,
   MemberGroupsResult,

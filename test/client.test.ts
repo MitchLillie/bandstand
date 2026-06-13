@@ -98,4 +98,23 @@ describe("BandClient request pipeline", () => {
     expect(page.items.map((i) => i.schedule_id)).toEqual(["a", "b"]);
     expect(n).toBe(2);
   });
+
+  it("deleteSchedule issues a GET to /v1/schedule/delete_schedule with the right params", async () => {
+    let captured = "";
+    const fetchImpl = (async (url: string | URL) => {
+      captured = String(url);
+      return jsonResponse({ result_code: 1, result_data: { message: "Request completed." } });
+    }) as typeof fetch;
+    const client = await BandClient.create({
+      cookies: BASE_COOKIES,
+      fetch: fetchImpl,
+      jitterMs: null,
+    });
+    await client.deleteSchedule(103117926, "4/103117926/1/19700101");
+    expect(captured).toContain("/v1/schedule/delete_schedule");
+    expect(captured).toContain("band_no=103117926");
+    expect(captured).toContain("repeat_edit_type=ALL");
+    expect(captured).toContain("notify_to_members=false");
+    expect(captured).toContain(encodeURIComponent("4/103117926/1/19700101"));
+  });
 });

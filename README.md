@@ -92,6 +92,7 @@ bandstand create     --band <band_no> --name "..." \
                      [--secret] [--share USER_NO,...] [--group <id>] [--announce]
 bandstand copy       <schedule_id> --band <band_no> [--name ...] [--start ...] \
                      [--group <id>] [--add-user ...] [--remove-user ...] [--dry-run]
+bandstand delete     <schedule_id> --band <band_no> [--notify]
 bandstand sync-group --band <band_no> --calendar <id> --group <id> [--days 120] [--apply] [--notify]
 ```
 
@@ -187,6 +188,7 @@ env vars.
 - `GET  /v2.0.0/touch_band_access` (warm-up)
 - `GET  /v1.6.0/get_schedule`, `/v1.6.0/get_schedules`
 - `POST /v2.0.0/create_schedule`, `/v2.0.3/update_schedule`
+- `GET  /v1/schedule/delete_schedule`
 
 All under `https://api-usw.band.us`. Other region shards (`api-ukw`, `api-jpw`,
 `api-krw`) exist if your account is routed elsewhere — override with the `apiBase`
@@ -205,7 +207,6 @@ npm run lint        # biome
 
 - `get_schedules` is paginated automatically (`paging.next_params`), capped at
   `maxPages` (default 50).
-- No `delete_schedule` helper yet.
 - No rate-limit backoff beyond jitter.
 
 ## Disclaimer

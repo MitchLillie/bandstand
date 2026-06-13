@@ -21,6 +21,7 @@ import type {
   CalendarRef,
   CalendarsResult,
   CreateScheduleResult,
+  DeleteScheduleResult,
   MemberGroupsResult,
   MembersResult,
   Paging,
@@ -331,6 +332,27 @@ export class BandClient {
         schedule: JSON.stringify(schedule),
         notify_to_members: String(opts.notify ?? false),
         recurring_edit_type: opts.recurringEditType ?? "ALL",
+      },
+    });
+  }
+
+  /**
+   * Delete a schedule. For a recurring series, `repeatEditType` controls scope
+   * (`ALL` removes every occurrence); it's harmless on a one-off event. Note BAND
+   * spells this param `repeat_edit_type` here, unlike `update_schedule`.
+   */
+  deleteSchedule(
+    bandNo: number,
+    scheduleId: string,
+    opts: { repeatEditType?: RecurringEditType; notify?: boolean } = {},
+  ): Promise<DeleteScheduleResult> {
+    this.referer = `https://www.band.us/band/${bandNo}/calendar`;
+    return this.call("GET", "/v1/schedule/delete_schedule", {
+      params: {
+        band_no: bandNo,
+        schedule_id: scheduleId,
+        repeat_edit_type: opts.repeatEditType ?? "ALL",
+        notify_to_members: String(opts.notify ?? false),
       },
     });
   }

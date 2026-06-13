@@ -380,6 +380,16 @@ async function cmdCopy(values: Values, positionals: string[], config: Config): P
   });
 }
 
+async function cmdDelete(values: Values, positionals: string[], config: Config): Promise<void> {
+  const scheduleId = positionals[0];
+  if (!scheduleId) fail("usage: bandstand delete <schedule_id>");
+  const band = requireBand(values, config);
+  await run(async (c) => {
+    const res = await c.deleteSchedule(band, scheduleId, { notify: Boolean(values.notify) });
+    console.log(`deleted: ${scheduleId}${res.message ? `  (${res.message})` : ""}`);
+  });
+}
+
 async function cmdSyncGroup(values: Values, _pos: string[], config: Config): Promise<void> {
   const band = requireBand(values, config);
   const calendar = num(values.calendar) ?? config.calendar;
@@ -553,6 +563,13 @@ const COMMANDS: Record<string, Command> = {
       "dry-run": { type: "boolean" },
     },
     run: cmdCopy,
+  },
+  delete: {
+    summary: "delete a schedule (whole recurring series with --repeat ALL)",
+    usage: "bandstand delete <schedule_id> --band N [--notify]",
+    allowPositionals: true,
+    options: { band: { type: "string" }, notify: { type: "boolean" } },
+    run: cmdDelete,
   },
   "sync-group": {
     summary: "add a member_group's current roster to every secret event on a calendar",
