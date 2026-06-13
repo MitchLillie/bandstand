@@ -1,0 +1,33 @@
+name: Publish
+
+# Publishes to npm when a GitHub Release is published (e.g. via `gh release create`),
+# or on a manual dispatch. NOT on every push to main — that would try to republish the
+# same version. Bump the version, tag it, cut a release → this runs.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required for npm Trusted Publishing (OIDC) + provenance
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Release event -> the release's tag; manual dispatch -> the default branch.
+          ref: ${{ github.event.release.tag_name || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      # Trusted Publishing needs npm >= 11.5.1; Node 22 ships an older npm.
+      - run: npm install -g npm@latest
+      - run: npm publish --access public --provenance

@@ -203,6 +203,19 @@ npm run build       # tsup -> dist/ (ESM + .d.ts)
 npm run lint        # biome
 ```
 
+### Releasing
+
+Publishing is automated by `.github/workflows/publish.yml`: cut a GitHub Release and
+CI publishes to npm via **Trusted Publishing (OIDC)** with provenance — no token in
+the repo. One-time setup: on npmjs.com, add this repo + `publish.yml` as a trusted
+publisher for the package.
+
+```bash
+npm version patch        # bumps package.json, commits, tags vX.Y.Z
+git push --follow-tags
+gh release create vX.Y.Z --generate-notes   # -> triggers the publish workflow
+```
+
 ## Limitations
 
 - `get_schedules` is paginated automatically (`paging.next_params`), capped at
