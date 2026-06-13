@@ -263,8 +263,11 @@ export class BandClient {
   }
 
   getMembers(bandNo: number): Promise<MembersResult> {
+    // The web client enumerates members via the `add_schedule_sharer` filter;
+    // `filter=member` is not valid and returns result_code 200 ("Temporary error").
+    // Note: this list excludes the current user (you can't share with yourself).
     return this.call("GET", "/v2.0.0/get_members_of_band_with_filter", {
-      params: { band_no: bandNo, filter: "member" },
+      params: { band_no: bandNo, filter: "add_schedule_sharer" },
     });
   }
 
