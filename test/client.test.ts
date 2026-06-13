@@ -149,3 +149,38 @@ describe("browser mode (sendCookieHeader: false)", () => {
     );
   });
 });
+
+describe("RSVP + whoami", () => {
+  it("setRsvp POSTs set_schedule_rsvp_states with target_users + rsvp_state", async () => {
+    let captured = { url: "", body: "" };
+    const fetchImpl = (async (url: string | URL, init?: RequestInit) => {
+      captured = { url: String(url), body: String(init?.body ?? "") };
+      return jsonResponse({ result_code: 1, result_data: {} });
+    }) as typeof fetch;
+    const client = await BandClient.create({
+      cookies: BASE_COOKIES,
+      fetch: fetchImpl,
+      jitterMs: null,
+    });
+    await client.setRsvp(103117926, "4/1/2/3", "ATTENDANCE", 999);
+    expect(captured.url).toContain("/v2.0.0/set_schedule_rsvp_states");
+    expect(captured.body).toContain("rsvp_state=ATTENDANCE");
+    expect(captured.body).toContain(encodeURIComponent(JSON.stringify([{ user_no: 999 }])));
+  });
+
+  it("getMe resolves the owner of my first schedule, or null", async () => {
+    const clientReturning = (items: unknown[]) =>
+      BandClient.create({
+        cookies: BASE_COOKIES,
+        jitterMs: null,
+        fetch: (async () =>
+          jsonResponse({ result_code: 1, result_data: { items } })) as typeof fetch,
+      });
+
+    const c1 = await clientReturning([{ owner: { user_no: 42, name: "Me" } }]);
+    expect(await c1.getMe(1)).toEqual({ user_no: 42, name: "Me" });
+
+    const c2 = await clientReturning([]);
+    expect(await c2.getMe(1)).toBeNull();
+  });
+});

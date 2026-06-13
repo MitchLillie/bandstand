@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
@@ -12,8 +12,9 @@ import { parseCookieHeader } from "./cookies";
 import { AuthError, BandApiError } from "./errors";
 import { dateWindow, fmtLocal, parseIso, scheduleUrl } from "./format";
 import { FileCookieStore } from "./node/file-store";
+import { rsvpSummary } from "./rsvp";
 import { applySharerFlags, parseUserList, stripForCreate } from "./schedule";
-import type { CalendarRef, Member, MembersResult, Schedule } from "./types";
+import type { CalendarRef, Member, MembersResult, RsvpState, Schedule } from "./types";
 
 type Values = Record<string, string | boolean | undefined>;
 
@@ -154,15 +155,24 @@ async function resolveGroup(
     .filter((u) => u && u !== me);
 }
 
+function configPath(): string {
+  return process.env.BAND_CONFIG ?? join(homedir(), ".band_config.json");
+}
+
 async function loadConfig(): Promise<Config> {
-  const path = process.env.BAND_CONFIG ?? join(homedir(), ".band_config.json");
   try {
-    return JSON.parse(await readFile(path, "utf8")) as Config;
+    return JSON.parse(await readFile(configPath(), "utf8")) as Config;
   } catch (err) {
     const e = err as NodeJS.ErrnoException;
     if (e.code === "ENOENT") return {};
-    return fail(`${path}: ${e.message}`);
+    return fail(`${configPath()}: ${e.message}`);
   }
+}
+
+async function saveConfigMe(userNo: number): Promise<void> {
+  const cfg = await loadConfig();
+  cfg.me = userNo;
+  await writeFile(configPath(), `${JSON.stringify(cfg, null, 2)}\n`, "utf8");
 }
 
 // ---- commands ----
@@ -471,6 +481,68 @@ async function cmdSyncGroup(values: Values, _pos: string[], config: Config): Pro
   });
 }
 
+async function cmdWhoami(values: Values, _pos: string[], config: Config): Promise<void> {
+  const band = requireBand(values, config);
+  const me = await run((c) => c.getMe(band));
+  if (!me) {
+    fail(
+      "could not determine your user_no on this band (no schedules of yours found). " +
+        "Try a band where you've created or joined events.",
+    );
+  }
+  console.log(`${me.user_no}  ${me.name}`);
+  if (values.save) {
+    await saveConfigMe(me.user_no);
+    console.log(`saved me=${me.user_no} to ${configPath()}`);
+  }
+}
+
+async function cmdRsvp(values: Values, positionals: string[], config: Config): Promise<void> {
+  const scheduleId = positionals[0];
+  if (!scheduleId) fail("usage: bandstand rsvp <schedule_id> --going|--maybe|--no");
+  const band = requireBand(values, config);
+  const state: RsvpState | undefined = values.going
+    ? "ATTENDANCE"
+    : values.maybe
+      ? "MAYBE"
+      : values.no
+        ? "ABSENCE"
+        : undefined;
+  if (!state) fail("pick one of --going / --maybe / --no");
+  await run(async (c) => {
+    const userNo = config.me ?? (await c.getMe(band))?.user_no;
+    if (!userNo) {
+      fail("unknown user_no — run `bandstand whoami --save` first, or set `me` in config");
+    }
+    await c.setRsvp(band, scheduleId, state, userNo);
+    console.log(`rsvp set: ${scheduleId} -> ${state}`);
+  });
+}
+
+async function cmdRsvpReport(values: Values, positionals: string[], config: Config): Promise<void> {
+  const scheduleId = positionals[0];
+  if (!scheduleId) fail("usage: bandstand rsvp-report <schedule_id>");
+  const band = requireBand(values, config);
+  const summary = await run(async (c) => rsvpSummary(await c.getSchedule(band, scheduleId)));
+  if (values.json) {
+    console.log(JSON.stringify(summary, null, 2));
+    return;
+  }
+  const { counts } = summary;
+  console.log(
+    `going ${counts.going} · maybe ${counts.maybe} · not going ${counts.notGoing} · invited ${counts.invited}`,
+  );
+  const section = (label: string, members: Array<{ name?: string }>) => {
+    if (members.length === 0) return;
+    console.log(`\n${label} (${members.length}):`);
+    for (const m of members) console.log(`  ${m.name ?? "(unknown)"}`);
+  };
+  section("Going", summary.going);
+  section("Maybe", summary.maybe);
+  section("Not going", summary.notGoing);
+  section("No response", summary.notResponded);
+}
+
 // ---- registry / dispatch ----
 
 const COMMANDS: Record<string, Command> = {
@@ -570,6 +642,30 @@ const COMMANDS: Record<string, Command> = {
     allowPositionals: true,
     options: { band: { type: "string" }, notify: { type: "boolean" } },
     run: cmdDelete,
+  },
+  whoami: {
+    summary: "print your user_no + name on a band (--save writes it to config)",
+    options: { band: { type: "string" }, save: { type: "boolean" } },
+    run: cmdWhoami,
+  },
+  rsvp: {
+    summary: "set your RSVP on an event (--going / --maybe / --no)",
+    usage: "bandstand rsvp <schedule_id> --band N --going|--maybe|--no",
+    allowPositionals: true,
+    options: {
+      band: { type: "string" },
+      going: { type: "boolean" },
+      maybe: { type: "boolean" },
+      no: { type: "boolean" },
+    },
+    run: cmdRsvp,
+  },
+  "rsvp-report": {
+    summary: "show who's going / hasn't responded to an event",
+    usage: "bandstand rsvp-report <schedule_id> --band N [--json]",
+    allowPositionals: true,
+    options: { band: { type: "string" }, json: { type: "boolean" } },
+    run: cmdRsvpReport,
   },
   "sync-group": {
     summary: "add a member_group's current roster to every secret event on a calendar",

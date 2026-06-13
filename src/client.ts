@@ -24,10 +24,13 @@ import type {
   DeleteScheduleResult,
   MemberGroupsResult,
   MembersResult,
+  MyBandSchedulesResult,
   Paging,
   RecurringEditType,
+  RsvpState,
   Schedule,
   SchedulesPage,
+  SetRsvpResult,
 } from "./types";
 
 export interface BandClientOptions {
@@ -371,6 +374,35 @@ export class BandClient {
         schedule_id: scheduleId,
         repeat_edit_type: opts.repeatEditType ?? "ALL",
         notify_to_members: String(opts.notify ?? false),
+      },
+    });
+  }
+
+  getMyBandSchedules(bandNo: number): Promise<MyBandSchedulesResult> {
+    return this.call("GET", "/v2.0.0/get_my_band_schedules", { params: { band_no: bandNo } });
+  }
+
+  /** Resolve the current user's `{ user_no, name }` from their own schedules, or null. */
+  async getMe(bandNo: number): Promise<{ user_no: number; name: string } | null> {
+    const data = await this.getMyBandSchedules(bandNo);
+    const owner = (data.items ?? data.schedules ?? [])[0]?.owner;
+    return owner?.user_no ? { user_no: owner.user_no, name: owner.name ?? "" } : null;
+  }
+
+  /** Set a user's RSVP on a schedule (defaults to the given user). */
+  setRsvp(
+    bandNo: number,
+    scheduleId: string,
+    state: RsvpState,
+    userNo: number,
+  ): Promise<SetRsvpResult> {
+    this.referer = `https://www.band.us/band/${bandNo}/calendar`;
+    return this.call("POST", "/v2.0.0/set_schedule_rsvp_states", {
+      body: {
+        band_no: bandNo,
+        schedule_id: scheduleId,
+        target_users: JSON.stringify([{ user_no: userNo }]),
+        rsvp_state: state,
       },
     });
   }

@@ -36,6 +36,17 @@ export interface MemberGroup {
 
 export interface SecretSharer {
   user_no: number;
+  name?: string;
+}
+
+export type RsvpState = "ATTENDANCE" | "ABSENCE" | "MAYBE";
+
+export interface RsvpMember {
+  // BAND's rsvp response lists identify members by name/member_key, not user_no.
+  user_no?: number;
+  name?: string;
+  member_key?: string;
+  [key: string]: unknown;
 }
 
 export interface Rsvp {
@@ -44,6 +55,15 @@ export interface Rsvp {
   rsvp_visible_qualification?: string;
   recurring_rsvp_end_offset?: number | null;
   is_maybe_enabled?: boolean;
+  // Populated on a detailed get_schedule response:
+  attendee_list?: RsvpMember[];
+  absentee_list?: RsvpMember[];
+  maybe_list?: RsvpMember[];
+  pending_attendee_list?: RsvpMember[];
+  attendee_count?: number;
+  absentee_count?: number;
+  maybe_count?: number;
+  viewer_rsvp_state?: RsvpState;
   [key: string]: unknown;
 }
 
@@ -60,9 +80,16 @@ export interface ScheduleLocation {
   [key: string]: unknown;
 }
 
+export interface ScheduleOwner {
+  user_no?: number;
+  name?: string;
+  [key: string]: unknown;
+}
+
 export interface Schedule {
   schedule_id?: string;
   band_no?: number;
+  owner?: ScheduleOwner;
   name?: string;
   description?: string;
   calendar?: CalendarRef | Calendar;
@@ -119,4 +146,13 @@ export type RecurringEditType = "ALL" | "THIS" | "THIS_AND_FUTURE";
 
 export interface DeleteScheduleResult {
   message?: string;
+}
+
+export interface MyBandSchedulesResult {
+  items?: Schedule[];
+  schedules?: Schedule[];
+}
+
+export interface SetRsvpResult {
+  [key: string]: unknown;
 }

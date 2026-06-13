@@ -79,10 +79,13 @@ retries once.
 ## CLI
 
 ```
+bandstand whoami     --band <band_no> [--save]
 bandstand calendars  --band <band_no>
 bandstand members    --band <band_no> [--group <member_group_id>] [--short]
 bandstand groups     --band <band_no> [--short]
 bandstand events     --band <band_no> [--start YYYYMMDD] [--end YYYYMMDD] [--calendar <id>] [--short]
+bandstand rsvp         <schedule_id> --band <band_no> --going|--maybe|--no
+bandstand rsvp-report  <schedule_id> --band <band_no> [--json]
 bandstand search     <term> --band <band_no> [--start ...] [--end ...] [--days N] [--json]
 bandstand week       --band <band_no> [--calendar <id>] [--days 7]
 bandstand create     --band <band_no> --file event.json [--announce]
@@ -113,8 +116,8 @@ don't retype them. CLI flags still override. Override the path with `BAND_CONFIG
 
 `me` is your own `user_no`. BAND rejects the event owner as their own
 `secret_sharer`, so `--group` / `sync-group` filter this value out of any roster
-they expand. Find it via `bandstand members --short` (or the entry flagged
-`me: true` in the full JSON).
+they expand. Get it (and optionally write it to config) with
+`bandstand whoami --band <band_no> --save`.
 
 ### Finding `band_no` and `calendar_id`
 
@@ -209,6 +212,8 @@ env vars.
 - `GET  /v1.6.0/get_schedule`, `/v1.6.0/get_schedules`
 - `POST /v2.0.0/create_schedule`, `/v2.0.3/update_schedule`
 - `GET  /v1/schedule/delete_schedule`
+- `GET  /v2.0.0/get_my_band_schedules` (whoami)
+- `POST /v2.0.0/set_schedule_rsvp_states` (rsvp)
 
 All under `https://api-usw.band.us`. Other region shards (`api-ukw`, `api-jpw`,
 `api-krw`) exist if your account is routed elsewhere — override with the `apiBase`

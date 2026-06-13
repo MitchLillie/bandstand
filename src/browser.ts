@@ -31,6 +31,7 @@ export {
   stripForCreate,
 } from "./schedule";
 export { dateWindow, fmtLocal, parseIso, scheduleUrl, yyyymmdd } from "./format";
+export { type RsvpSummary, rsvpSummary } from "./rsvp";
 export { COOKIE_INSTRUCTIONS, DEFAULT_AKEY, DEFAULT_API_BASE } from "./constants";
 export type {
   Alarm,
@@ -44,11 +45,16 @@ export type {
   MemberGroup,
   MemberGroupsResult,
   MembersResult,
+  MyBandSchedulesResult,
   Paging,
   RecurringEditType,
   Rsvp,
+  RsvpMember,
+  RsvpState,
   Schedule,
   ScheduleLocation,
+  ScheduleOwner,
   SchedulesPage,
   SecretSharer,
+  SetRsvpResult,
 } from "./types";

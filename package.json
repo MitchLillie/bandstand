@@ -1,6 +1,6 @@
 {
   "name": "bandstand",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Unofficial TypeScript client + CLI for BAND (band.us) calendars — read and write schedules the official Developer API doesn't expose.",
   "type": "module",
   "license": "MIT",
