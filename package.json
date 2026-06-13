@@ -1,0 +1,49 @@
+{
+  "name": "bandstand",
+  "version": "0.1.0",
+  "description": "Unofficial TypeScript client + CLI for BAND (band.us) calendars — read and write schedules the official Developer API doesn't expose.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Mitch Lillie",
+  "homepage": "https://github.com/MitchLillie/bandstand#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MitchLillie/bandstand.git"
+  },
+  "keywords": ["band", "band.us", "calendar", "schedule", "cli", "bandstand", "unofficial"],
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "bandstand": "./dist/cli.js",
+    "bs": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^22.10.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
