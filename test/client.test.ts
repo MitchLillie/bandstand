@@ -184,3 +184,27 @@ describe("RSVP + whoami", () => {
     expect(await c2.getMe(1)).toBeNull();
   });
 });
+
+describe("default fetch receiver", () => {
+  it("calls the global fetch bound to globalThis (no 'Illegal invocation' in a worker)", async () => {
+    const realFetch = globalThis.fetch;
+    // Browsers/service workers throw if fetch runs with the wrong `this`; Node's
+    // fetch doesn't. Simulate the strict behavior to guard the binding.
+    function pickyFetch(this: unknown): Promise<Response> {
+      if (this !== globalThis) {
+        throw new TypeError("Failed to execute 'fetch' on 'WorkerGlobalScope': Illegal invocation");
+      }
+      return Promise.resolve(
+        jsonResponse({ result_code: 1, result_data: { internal_calendars: [] } }),
+      );
+    }
+    globalThis.fetch = pickyFetch as unknown as typeof fetch;
+    try {
+      // No `fetch` option → the client uses the (bound) global fetch.
+      const client = await BandClient.create({ cookies: BASE_COOKIES, jitterMs: null });
+      await expect(client.getCalendars(1)).resolves.toEqual({ internal_calendars: [] });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});

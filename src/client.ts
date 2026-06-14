@@ -139,7 +139,10 @@ export class BandClient {
     const hmacKey = await importHmacKey(secret, crypto);
     const cfg: ResolvedConfig = {
       store,
-      fetchImpl: options.fetch ?? globalThis.fetch,
+      // Bind the default global fetch to the global scope. Calling it detached
+      // (as `this.cfg.fetchImpl(...)`) throws "Illegal invocation" in browsers and
+      // service workers, where fetch requires its `this` to be the global object.
+      fetchImpl: options.fetch ?? globalThis.fetch.bind(globalThis),
       crypto,
       apiBase: options.apiBase ?? DEFAULT_API_BASE,
       akey: options.akey ?? DEFAULT_AKEY,
