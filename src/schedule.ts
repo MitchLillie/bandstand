@@ -1,4 +1,4 @@
-import type { CalendarRef, Rsvp, Schedule, SecretSharer } from "./types";
+import type { CalendarRef, Rsvp, Schedule, ScheduleLocation, SecretSharer } from "./types";
 
 /** Fields BAND's `create_schedule` accepts; everything else is rejected as an extra. */
 const WRITABLE_SCHEDULE_FIELDS = new Set<string>([
@@ -67,6 +67,99 @@ export function stripForCreate(src: Schedule): Schedule {
 
   if (Array.isArray(out.secret_sharers)) {
     out.secret_sharers = normalizeSharers(out.secret_sharers);
+  }
+  return out;
+}
+
+/**
+ * The event's location, wherever BAND is currently keeping it.
+ *
+ * `update_schedule` accepts the venue as `location`, but `get_schedule` returns
+ * it nested under `attachment.location_v2`. Reading only `location` therefore
+ * finds nothing on most events, and a fetch-modify-write round trip silently
+ * drops the venue.
+ */
+export function scheduleLocation(src: Schedule): ScheduleLocation | undefined {
+  return src.location ?? src.attachment?.location_v2 ?? undefined;
+}
+
+/**
+ * Format an instant as local time with a UTC offset, e.g.
+ * `2026-08-08T12:00:00-0600`.
+ *
+ * `get_schedule` returns timestamps in UTC, but `update_schedule` expects them
+ * in the event's own zone with an offset. Posting the UTC value straight back
+ * shifts evening events onto the following day.
+ */
+export function toLocalOffsetIso(instant: string | number | Date, timeZone: string): string {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+      timeZoneName: "longOffset",
+    })
+      .formatToParts(new Date(instant))
+      .map((p) => [p.type, p.value]),
+  ) as Record<string, string>;
+  const offset = (parts.timeZoneName ?? "GMT+00:00").replace("GMT", "").replace(":", "") || "+0000";
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}${offset}`;
+}
+
+/**
+ * Reduce a `get_schedule` response to what `update_schedule` accepts.
+ *
+ * Distinct from {@link stripForCreate}: the update endpoint wants local-offset
+ * timestamps, an explicit `calendar_id` (null when default), and the
+ * `is_album_auto_created` / `is_secret` / `alarms` / `signups` quartet.
+ *
+ * `update_schedule` REPLACES the whole schedule object, so every field omitted
+ * here is deleted server-side. Anything present on the source that the user can
+ * set — location, photos, files, alarms, sign-ups, RSVP, secret sharers — is
+ * carried through untouched rather than rebuilt, so nothing is silently lost.
+ *
+ * @param timeZoneId overrides the event's own `schedule_time_zone_id`.
+ */
+export function stripForUpdate(src: Schedule, timeZoneId?: string): Schedule {
+  const tz = timeZoneId ?? src.schedule_time_zone_id ?? "UTC";
+  const out: Schedule = {
+    name: src.name,
+    is_local_meetup: Boolean(src.is_local_meetup),
+    is_album_auto_created: Boolean(src.is_album_auto_created),
+    description: src.description ?? "",
+    calendar: {
+      calendar_id: (src.calendar as CalendarRef | undefined)?.calendar_id ?? null,
+      is_default: Boolean((src.calendar as CalendarRef | undefined)?.is_default),
+    } as CalendarRef,
+    is_all_day: Boolean(src.is_all_day),
+    is_lunar: Boolean(src.is_lunar),
+    is_secret: Boolean(src.is_secret),
+    schedule_time_zone_id: tz,
+    photos: [],
+    files: [],
+    dropbox_files: [],
+    external_files: [],
+    alarms: src.alarms ?? [],
+    signups: src.signups ?? [],
+  };
+
+  if (src.start_at) out.start_at = toLocalOffsetIso(src.start_at, tz);
+  if (src.end_at) out.end_at = toLocalOffsetIso(src.end_at, tz);
+
+  const location = scheduleLocation(src);
+  if (location) out.location = location;
+  if (src.rsvp) out.rsvp = src.rsvp;
+  if (Array.isArray(src.secret_sharers) && src.secret_sharers.length > 0) {
+    out.secret_sharers = normalizeSharers(src.secret_sharers);
+  }
+  for (const field of EMPTY_LIST_FIELDS) {
+    const value = src[field];
+    if (Array.isArray(value) && value.length > 0) out[field] = value;
   }
   return out;
 }

@@ -210,7 +210,7 @@ env vars.
 - `GET  /v2.1.0/get_member_groups`
 - `GET  /v2.0.0/touch_band_access` (warm-up)
 - `GET  /v1.6.0/get_schedule`, `/v1.6.0/get_schedules`
-- `POST /v2.0.0/create_schedule`, `/v2.0.3/update_schedule`
+- `POST /v2.0.0/create_schedule`, `/v2.0.4/update_schedule`
 - `GET  /v1/schedule/delete_schedule`
 - `GET  /v2.0.0/get_my_band_schedules` (whoami)
 - `POST /v2.0.0/set_schedule_rsvp_states` (rsvp)

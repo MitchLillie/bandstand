@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { applySharerFlags, parseUserList, stripForCreate } from "../src/schedule";
+import { normalizeEditType } from "../src/client";
+import {
+  applySharerFlags,
+  parseUserList,
+  scheduleLocation,
+  stripForCreate,
+  stripForUpdate,
+  toLocalOffsetIso,
+} from "../src/schedule";
 import type { Schedule } from "../src/types";
 
 describe("stripForCreate", () => {
@@ -61,5 +69,114 @@ describe("parseUserList", () => {
   });
   it("throws on non-numeric input", () => {
     expect(() => parseUserList("1,abc")).toThrow();
+  });
+});
+
+describe("toLocalOffsetIso", () => {
+  it("renders a UTC instant as local time with an offset", () => {
+    // get_schedule returns UTC; update_schedule wants local + offset.
+    expect(toLocalOffsetIso("2026-08-08T18:00:00Z", "America/Denver")).toBe(
+      "2026-08-08T12:00:00-0600",
+    );
+    // An evening event: the UTC date is the NEXT day, the local date is not.
+    expect(toLocalOffsetIso("2026-09-23T02:00:00Z", "America/Denver")).toBe(
+      "2026-09-22T20:00:00-0600",
+    );
+    // Standard time, so a different offset for the same zone.
+    expect(toLocalOffsetIso("2026-11-18T03:00:00Z", "America/Denver")).toBe(
+      "2026-11-17T20:00:00-0700",
+    );
+  });
+});
+
+describe("scheduleLocation", () => {
+  it("finds a venue returned under attachment.location_v2", () => {
+    expect(
+      scheduleLocation({ attachment: { location_v2: { name: "Butterfield Park Pavilion" } } }),
+    ).toEqual({ name: "Butterfield Park Pavilion" });
+  });
+
+  it("prefers a top-level location and keeps its coordinates", () => {
+    const pinned = { latitude: 40.49, longitude: -112.03, name: "X", address: "Y" };
+    expect(scheduleLocation({ location: pinned })).toEqual(pinned);
+  });
+
+  it("returns undefined when there is no venue", () => {
+    expect(scheduleLocation({})).toBeUndefined();
+    expect(scheduleLocation({ attachment: {} })).toBeUndefined();
+  });
+});
+
+describe("stripForUpdate", () => {
+  const base: Schedule = {
+    name: "Rehearsal",
+    schedule_id: "4/1/2/3",
+    comment_count: 5,
+    start_at: "2026-08-08T18:00:00Z",
+    end_at: "2026-08-08T20:00:00Z",
+    schedule_time_zone_id: "America/Denver",
+    calendar: { is_default: true },
+  };
+
+  it("converts timestamps into local time with an offset", () => {
+    const out = stripForUpdate(base);
+    expect(out.start_at).toBe("2026-08-08T12:00:00-0600");
+    expect(out.end_at).toBe("2026-08-08T14:00:00-0600");
+  });
+
+  it("sends calendar_id explicitly as null on the default calendar", () => {
+    const out = stripForUpdate(base);
+    expect(out.calendar).toEqual({ calendar_id: null, is_default: true });
+    expect(Object.keys(out.calendar as object)).toContain("calendar_id");
+  });
+
+  it("includes the fields the update endpoint requires", () => {
+    const out = stripForUpdate(base);
+    for (const key of ["is_album_auto_created", "is_secret", "alarms", "signups"]) {
+      expect(out).toHaveProperty(key);
+    }
+    expect(out.schedule_id).toBeUndefined();
+    expect(out).not.toHaveProperty("comment_count");
+  });
+
+  it("carries a venue across even though it is read from attachment", () => {
+    // Regression: update_schedule replaces the whole object, so dropping this
+    // erases the event's location with no error.
+    const out = stripForUpdate({
+      ...base,
+      attachment: { location_v2: { name: "Butterfield Park Pavilion" } },
+    });
+    expect(out.location).toEqual({ name: "Butterfield Park Pavilion" });
+  });
+
+  it("does not blank existing photos, files or sharers", () => {
+    const out = stripForUpdate({
+      ...base,
+      photos: [{ photo_key: "abc" }],
+      files: [{ file_id: 9 }],
+      secret_sharers: [{ user_no: 7 }],
+    });
+    expect(out.photos).toEqual([{ photo_key: "abc" }]);
+    expect(out.files).toEqual([{ file_id: 9 }]);
+    expect(out.secret_sharers).toEqual([{ user_no: 7 }]);
+  });
+
+  it("omits location and sharers entirely when the event has none", () => {
+    const out = stripForUpdate(base);
+    expect(out).not.toHaveProperty("location");
+    expect(out).not.toHaveProperty("secret_sharers");
+    expect(out.photos).toEqual([]);
+  });
+});
+
+describe("normalizeEditType", () => {
+  it("translates the legacy THIS value to ONE_ONLY", () => {
+    expect(normalizeEditType("THIS")).toBe("ONE_ONLY");
+  });
+
+  it("passes through current values and defaults to ALL", () => {
+    expect(normalizeEditType("ONE_ONLY")).toBe("ONE_ONLY");
+    expect(normalizeEditType("ALL")).toBe("ALL");
+    expect(normalizeEditType(undefined)).toBe("ALL");
   });
 });
