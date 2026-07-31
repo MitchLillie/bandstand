@@ -108,6 +108,15 @@ export interface Schedule {
   rsvp?: Rsvp;
   is_local_meetup?: boolean;
   location?: ScheduleLocation;
+  is_album_auto_created?: boolean;
+  signups?: unknown[];
+  /**
+   * Read-only container BAND returns on `get_schedule`. Note that the event's
+   * location comes back here as `location_v2` even though it is *written* as
+   * `location` — see {@link scheduleLocation}.
+   */
+  attachment?: { location_v2?: ScheduleLocation; [key: string]: unknown };
+  recurrence?: { freq?: string; since?: string; until?: string; [key: string]: unknown };
   [key: string]: unknown;
 }
 
@@ -142,7 +151,21 @@ export interface CreateScheduleResult {
   schedule?: { schedule_id?: string; [key: string]: unknown };
 }
 
-export type RecurringEditType = "ALL" | "THIS" | "THIS_AND_FUTURE";
+/**
+ * Scope of a recurring edit.
+ *
+ * BAND's 2026 calendar release renamed the single-occurrence value from `THIS`
+ * to `ONE_ONLY`; `THIS` is now rejected by the server. It is kept here for
+ * source compatibility and translated to `ONE_ONLY` on the way out.
+ *
+ * Note: only `ALL` and `ONE_ONLY` have been verified against the live API.
+ */
+export type RecurringEditType =
+  | "ALL"
+  | "ONE_ONLY"
+  | "THIS_AND_FUTURE"
+  /** @deprecated renamed to `ONE_ONLY`; still accepted and translated. */
+  | "THIS";
 
 export interface DeleteScheduleResult {
   message?: string;

@@ -252,7 +252,14 @@ export class BandClient {
       if (AUTH_HINTS.some((hint) => blob.includes(hint))) {
         throw new AuthError(`API auth error: ${JSON.stringify(json)}`);
       }
-      throw new BandApiError(`API error (result_code=${json.result_code})`, json.result_code, json);
+      // BAND puts the human-readable reason in result_data.message; without it
+      // every failure reads as a bare result_code and is near-undiagnosable.
+      const detail = (json as { result_data?: { message?: unknown } }).result_data?.message;
+      throw new BandApiError(
+        `API error (result_code=${json.result_code})${typeof detail === "string" ? `: ${detail}` : ""}`,
+        json.result_code,
+        json,
+      );
     }
     return json.result_data;
   }
@@ -352,13 +359,13 @@ export class BandClient {
   ): Promise<CreateScheduleResult> {
     this.referer = `https://www.band.us/band/${bandNo}/calendar`;
     await this.warmUp(bandNo);
-    return this.call("POST", "/v2.0.3/update_schedule", {
+    return this.call("POST", "/v2.0.4/update_schedule", {
       body: {
         band_no: bandNo,
         schedule_id: scheduleId,
         schedule: JSON.stringify(schedule),
         notify_to_members: String(opts.notify ?? false),
-        recurring_edit_type: opts.recurringEditType ?? "ALL",
+        recurring_edit_type: normalizeEditType(opts.recurringEditType),
       },
     });
   }
@@ -412,6 +419,14 @@ export class BandClient {
       },
     });
   }
+}
+
+/**
+ * BAND's 2026 calendar release renamed the single-occurrence edit scope from
+ * `THIS` to `ONE_ONLY`. Callers passing the old value keep working.
+ */
+export function normalizeEditType(value: RecurringEditType | undefined): string {
+  return value === "THIS" ? "ONE_ONLY" : (value ?? "ALL");
 }
 
 function pagingToParams(next: string | Record<string, unknown>): Record<string, Primitive> {

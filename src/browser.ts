@@ -27,8 +27,11 @@ export {
   applySharerFlags,
   normalizeSharers,
   parseUserList,
+  scheduleLocation,
   type SharerOptions,
   stripForCreate,
+  stripForUpdate,
+  toLocalOffsetIso,
 } from "./schedule";
 export { dateWindow, fmtLocal, parseIso, scheduleUrl, yyyymmdd } from "./format";
 export { type RsvpSummary, rsvpSummary } from "./rsvp";
