@@ -60,21 +60,41 @@ bandstand login
 
 This opens `https://www.band.us/`. Then, in DevTools:
 
-**Application → Cookies → https://www.band.us**, copy the **values** of two cookies:
+**Application → Cookies → https://www.band.us** — click a row, select all
+(<kbd>Cmd/Ctrl-A</kbd>), copy (<kbd>Cmd/Ctrl-C</kbd>), and paste the **whole table** at
+the prompt. Press <kbd>Enter</kbd> on a blank line (or <kbd>Ctrl-D</kbd>) when done.
 
-- `band_session`
-- `secretKey` — **HttpOnly**, so `copy(document.cookie)` in the Console silently
-  misses it. Grab it from the cookies panel.
+- `band_session` and `secretKey` are **required** — login refuses to save without both.
+- `ai`, `as`, `rt`, `SESSION`, `JSESSIONID`, `BBC` and `di` ride along in the same
+  paste and make the session look browser-native.
+- Both required cookies are **HttpOnly**, so `copy(document.cookie)` in the Console
+  silently misses them. Take them from the cookies panel.
 
-Paste them when prompted, in either form:
+No reformatting: the paste is auto-detected. All of these work —
 
 ```
-band_session=<value>; secretKey=<value>
+Name          Value      Domain   …          ← the DevTools table, header optional
+band_session  <value>    .band.us …
+secretKey     "<value>"  .band.us …
+
+band_session=<value>; secretKey=<value>      ← one line, as before
+band_session=<value>                         ← one name=value per line
+[{"name":"band_session","value":"…"}, …]     ← cookie-export / CDP JSON
+curl 'https://…' -H 'cookie: band_session=…' ← a whole "Copy as cURL"
 ```
 
-Quotes around `secretKey`'s value are fine — they're stripped. Cookies are saved to
-`~/.band_session.json` (mode `600`). If a command later hits auth, it re-prompts and
-retries once.
+Extra columns, quoted values, blank lines and unrelated cookies are ignored. Login
+prints how many cookies it recognized and **names any of the nine that are missing** —
+never the values. It can also read the paste from a pipe:
+
+```bash
+pbpaste | bandstand login          # macOS
+bandstand login < cookies.txt
+bandstand login --session 'band_session=…; secretKey=…'
+```
+
+Cookies are saved to `~/.band_session.json` (mode `600`). If a command later hits auth,
+it re-prompts and retries once.
 
 ## CLI
 

@@ -23,11 +23,13 @@ export const COOKIE_INSTRUCTIONS = `BAND session is missing or expired. To grab 
 
   1. Open  https://www.band.us/   (log in if needed)
   2. DevTools → Application → Cookies → https://www.band.us
-  3. Copy the VALUES of these two cookies:
-       * band_session
-       * secretKey     (HttpOnly, not in document.cookie — grab it from this panel)
-  4. Paste when prompted as:   band_session=<value>; secretKey=<value>
+  3. Click any row, select all (Cmd/Ctrl-A) and copy (Cmd/Ctrl-C) — the whole table.
+     band_session and secretKey are required; ai, as, rt, SESSION, JSESSIONID, BBC
+     and di come along for free and keep the session looking browser-native. Both
+     required cookies are HttpOnly, so copy(document.cookie) silently misses them.
+  4. Paste at the prompt, then press Enter on a blank line (or Ctrl-D).
 
-     Quotes around secretKey's value are fine — they'll be stripped. Including the
-     other cookies (BBC, di, language, …) is optional but helps traffic look
-     browser-native.`;
+     The format is auto-detected: the DevTools table with or without its header,
+     one name=value or name<TAB>value per line, a single "a=1; b=2" line, exported
+     JSON, or a whole "Copy as cURL" command. Extra columns, quotes and unrelated
+     cookies are handled. You can also pipe it in:  pbpaste | bandstand login`;
