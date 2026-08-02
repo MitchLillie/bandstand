@@ -366,3 +366,41 @@ describe("formatCookieReport", () => {
     }
   });
 });
+
+describe("tabs lost to copy-paste", () => {
+  it("accepts a two-column pair separated by spaces", () => {
+    const jar = parseCookieBlob("band_session   ABC123\nsecretKey   \"DEF456\"");
+    expect(jar.band_session).toBe("ABC123");
+    expect(jar.secretKey).toBe('"DEF456"');
+  });
+
+  it("accepts a single space as the separator", () => {
+    expect(parseCookieBlob("band_session ABC123").band_session).toBe("ABC123");
+  });
+
+  it("does not read a two-word heading as a cookie", () => {
+    // "Request Cookies" has exactly the shape of a space-separated pair.
+    expect(parseCookieBlob("Request Cookies\nband_session ABC")).toEqual({
+      band_session: "ABC",
+    });
+  });
+
+  it("an unexpected cookie name still needs a real table row", () => {
+    expect(parseCookieBlob("some_other_cookie ABC")).toEqual({});
+    expect(parseCookieBlob("some_other_cookie\tABC\t.band.us")).toEqual({
+      some_other_cookie: "ABC",
+    });
+  });
+
+  it("still routes the one-line form to the name=value parser", () => {
+    const jar = parseCookieBlob("band_session=ABC123; secretKey=DEF456");
+    expect(jar.band_session).toBe("ABC123");
+    expect(jar.secretKey).toBe("DEF456");
+  });
+
+  it("does not mistake a space-separated one-line paste for a table", () => {
+    const jar = parseCookieBlob("band_session=ABC123; secretKey=DEF456; ai=X");
+    expect(jar.ai).toBe("X");
+    expect(Object.keys(jar)).toHaveLength(3);
+  });
+});

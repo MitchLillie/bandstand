@@ -139,10 +139,33 @@ async function saveCookies(store: FileCookieStore, raw: string): Promise<void> {
   await store.save(jar);
 }
 
+/**
+ * Show the instructions, then open band.us — in that order, and only once the
+ * user has said go.
+ *
+ * Opening a browser the instant a command is typed is startling, and it steals
+ * focus, so instructions printed alongside it get read second, from behind a
+ * window. Asking first costs one keystroke and removes both problems. Answering
+ * anything other than Enter skips the browser, for when it is already open.
+ */
+async function offerBrowser(): Promise<void> {
+  console.error(COOKIE_INSTRUCTIONS);
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  let answer = "";
+  try {
+    answer = await rl.question(
+      "\nPress Enter to open band.us in your browser " +
+        "(or type s to skip if it is already open, Ctrl-C to cancel): ",
+    );
+  } finally {
+    rl.close();
+  }
+  if (answer.trim() === "") openBrowser("https://www.band.us/");
+}
+
 async function reprompt(store: FileCookieStore, err: AuthError): Promise<void> {
   console.error(`\n[auth] ${err.message}`);
-  console.error(COOKIE_INSTRUCTIONS);
-  openBrowser("https://www.band.us/");
+  await offerBrowser();
   const raw = await promptCookies();
   if (!raw.trim()) fail("aborted");
   await saveCookies(store, raw);
@@ -220,10 +243,7 @@ async function cmdLogin(values: Values): Promise<void> {
   let raw = str(values.session);
   if (!raw) {
     // A piped paste needs neither the instructions nor a browser window.
-    if (process.stdin.isTTY) {
-      console.error(COOKIE_INSTRUCTIONS);
-      openBrowser("https://www.band.us/");
-    }
+    if (process.stdin.isTTY) await offerBrowser();
     raw = await promptCookies();
   }
   if (!raw.trim()) fail("aborted");

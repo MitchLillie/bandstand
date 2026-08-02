@@ -150,16 +150,26 @@ function addPairs(jar: CookieJar, text: string): void {
 /**
  * Split a table row into columns, or return null if the line isn't one.
  *
- * Tabs are what the DevTools table copies as. Editors and chat clients sometimes
- * turn them into runs of spaces, so fall back to that — but only for lines that
- * open with a bare cookie name and carry a third column, which is enough to keep
- * `a=1; b=2; c=3` (three space-separated pairs) out of the table path.
+ * Tabs are what the DevTools table copies as. Editors, chat clients and
+ * documentation routinely turn them into runs of spaces, and a paste that has
+ * lost its tabs is the common case rather than the exotic one — so accept that
+ * too, guarded so the `a=1; b=2` one-line form still takes its own path.
  */
 function splitColumns(line: string): string[] | null {
   if (line.includes("\t")) return line.split("\t");
   const fields = line.trim().split(/\s+/);
-  if (fields.length < 3) return null;
-  return COOKIE_NAME.test(fields[0] ?? "") ? fields : null;
+  if (fields.length < 2) return null;
+  if (!COOKIE_NAME.test(fields[0] ?? "")) return null;
+  // Three or more fields is unambiguously a table row.
+  if (fields.length >= 3) return fields;
+  // Exactly two fields is ambiguous: "band_session abc" is a cookie, but so is
+  // the shape of "Request Cookies", a heading DevTools emits. Nothing about the
+  // text distinguishes them, so require a cookie we actually expect. A genuine
+  // table row still has three or more fields and is handled above.
+  if (/[=;]/.test(line)) return null;
+  return EXPECTED_COOKIES.includes(fields[0] as (typeof EXPECTED_COOKIES)[number])
+    ? fields
+    : null;
 }
 
 /** Locate the Name and Value columns in a header row, if this row is one. */
