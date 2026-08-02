@@ -16,6 +16,14 @@ export { BandClient } from "./client";
 export type { BandClientOptions } from "./client";
 export { AuthError, BandApiError } from "./errors";
 export {
+  type CookieReport,
+  EXPECTED_COOKIES,
+  formatCookieReport,
+  inspectCookies,
+  parseCookieBlob,
+  REQUIRED_COOKIES,
+} from "./cookie-paste";
+export {
   type CookieJar,
   extractSecret,
   mergeSetCookies,

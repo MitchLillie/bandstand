@@ -8,10 +8,10 @@ import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import { BandClient } from "./client";
 import { COOKIE_INSTRUCTIONS } from "./constants";
-import { parseCookieHeader } from "./cookies";
+import { formatCookieReport, inspectCookies, parseCookieBlob } from "./cookie-paste";
 import { AuthError, BandApiError } from "./errors";
 import { dateWindow, fmtLocal, parseIso, scheduleUrl } from "./format";
-import { FileCookieStore } from "./node/file-store";
+import { DEFAULT_STATE_PATH, FileCookieStore } from "./node/file-store";
 import { rsvpSummary } from "./rsvp";
 import { applySharerFlags, parseUserList, stripForCreate } from "./schedule";
 import type { CalendarRef, Member, MembersResult, RsvpState, Schedule } from "./types";
@@ -86,18 +86,56 @@ function openBrowser(url: string): void {
   }
 }
 
-async function promptCookie(): Promise<string> {
+/** Everything on stdin — `pbpaste | bandstand login`, `bandstand login < cookies.txt`. */
+async function readStdin(): Promise<string> {
+  const chunks: string[] = [];
+  process.stdin.setEncoding("utf8");
+  for await (const chunk of process.stdin) chunks.push(String(chunk));
+  return chunks.join("");
+}
+
+/**
+ * Read a cookie paste. The DevTools cookie table is many lines, so collect them
+ * all: a blank line ends the paste, and so does EOF (Ctrl-D / Ctrl-Z on Windows).
+ */
+async function promptCookies(): Promise<string> {
+  if (!process.stdin.isTTY) return readStdin();
+  process.stderr.write("\npaste cookies, then Enter on a blank line (or Ctrl-D):\n");
   const rl = createInterface({ input: process.stdin, output: process.stderr });
+  const lines: string[] = [];
   try {
-    return (await rl.question("paste cookie: ")).trim();
+    for await (const line of rl) {
+      if (line.trim() === "") {
+        if (lines.length > 0) break;
+        continue; // leading blank lines are just paste noise
+      }
+      lines.push(line);
+    }
   } finally {
     rl.close();
   }
+  return lines.join("\n");
 }
 
+/**
+ * Parse a paste, report what we got — names and counts only, never values — and
+ * refuse to save a session that is missing a cookie it cannot work without.
+ */
 async function saveCookies(store: FileCookieStore, raw: string): Promise<void> {
-  const jar = parseCookieHeader(raw);
-  if (!jar.band_session) fail("no band_session found in input");
+  const jar = parseCookieBlob(raw);
+  console.error(formatCookieReport(jar));
+  const { missingRequired } = inspectCookies(jar);
+  if (missingRequired.length > 0) {
+    fail(
+      [
+        "",
+        `not saved — required cookie(s) missing: ${missingRequired.join(", ")}.`,
+        "That session cannot sign a single request. Copy the whole cookie table from",
+        "DevTools → Application → Cookies → https://www.band.us — the HttpOnly rows are",
+        "not in document.cookie — and run `bandstand login` again.",
+      ].join("\n"),
+    );
+  }
   await store.save(jar);
 }
 
@@ -105,8 +143,8 @@ async function reprompt(store: FileCookieStore, err: AuthError): Promise<void> {
   console.error(`\n[auth] ${err.message}`);
   console.error(COOKIE_INSTRUCTIONS);
   openBrowser("https://www.band.us/");
-  const raw = await promptCookie();
-  if (!raw) fail("aborted");
+  const raw = await promptCookies();
+  if (!raw.trim()) fail("aborted");
   await saveCookies(store, raw);
 }
 
@@ -181,17 +219,17 @@ async function cmdLogin(values: Values): Promise<void> {
   const store = new FileCookieStore();
   let raw = str(values.session);
   if (!raw) {
-    console.error(COOKIE_INSTRUCTIONS);
-    openBrowser("https://www.band.us/");
-    raw = await promptCookie();
+    // A piped paste needs neither the instructions nor a browser window.
+    if (process.stdin.isTTY) {
+      console.error(COOKIE_INSTRUCTIONS);
+      openBrowser("https://www.band.us/");
+    }
+    raw = await promptCookies();
   }
-  if (!raw) fail("aborted");
+  if (!raw.trim()) fail("aborted");
   await saveCookies(store, raw);
   const client = await BandClient.create({ store });
-  const names = client.cookieNames();
-  console.log(
-    `ok — saved ${names.length} cookies; secretKey present: ${names.includes("secretKey")}.`,
-  );
+  console.log(`ok — saved ${client.cookieNames().length} cookies to ${DEFAULT_STATE_PATH}`);
 }
 
 async function cmdCalendars(values: Values, _pos: string[], config: Config): Promise<void> {
@@ -547,7 +585,8 @@ async function cmdRsvpReport(values: Values, positionals: string[], config: Conf
 
 const COMMANDS: Record<string, Command> = {
   login: {
-    summary: "save BAND cookies (interactive if --session omitted)",
+    summary: "save BAND cookies — paste the DevTools cookie table, or pipe any format in",
+    usage: "bandstand login [--session '<cookies>']   # or: pbpaste | bandstand login",
     options: { session: { type: "string" } },
     run: (v) => cmdLogin(v),
   },
