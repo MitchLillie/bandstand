@@ -54,3 +54,11 @@ export function extractSecret(jar: CookieJar): string | undefined {
   const raw = jar.secretKey;
   return raw === undefined ? undefined : raw.replace(/^"+|"+$/g, "");
 }
+
+/**
+ * Whether `band_session` is a JWT (`header.payload.signature`) rather than BAND's
+ * legacy opaque token. JWT sessions sign with the base64url-decoded `secretKey`.
+ */
+export function isJwtSession(jar: CookieJar): boolean {
+  return jar.band_session?.split(".").length === 3;
+}

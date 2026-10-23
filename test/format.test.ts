@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dateWindow, parseIso, scheduleUrl, yyyymmdd } from "../src/format";
+import { dateWindow, parseIso, scheduleUrl, toApiTimestamp, yyyymmdd } from "../src/format";
 
 describe("parseIso", () => {
   it("parses offsets written without a colon", () => {
@@ -39,5 +39,23 @@ describe("scheduleUrl", () => {
 describe("yyyymmdd", () => {
   it("zero-pads month and day", () => {
     expect(yyyymmdd(new Date(2026, 2, 9))).toBe("20260309");
+  });
+});
+
+describe("toApiTimestamp", () => {
+  it("normalizes offsets (with or without a colon) to UTC Z form", () => {
+    expect(toApiTimestamp("2026-05-01T18:30:00-0700")).toBe("2026-05-02T01:30:00Z");
+    expect(toApiTimestamp("2026-05-01T18:30:00-07:00")).toBe("2026-05-02T01:30:00Z");
+    expect(toApiTimestamp("2026-10-24T17:00:00Z")).toBe("2026-10-24T17:00:00Z");
+  });
+
+  it("treats offset-less input as local time", () => {
+    expect(toApiTimestamp("2026-05-01T18:30")).toBe(
+      new Date(2026, 4, 1, 18, 30).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    );
+  });
+
+  it("returns null for garbage", () => {
+    expect(toApiTimestamp("next tuesday")).toBeNull();
   });
 });

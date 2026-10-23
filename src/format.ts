@@ -31,6 +31,17 @@ export function parseIso(raw: string | undefined | null): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+/**
+ * Normalize a user-supplied time to the `YYYY-MM-DDTHH:MM:SSZ` form BAND returns.
+ * Accepts anything {@link parseIso} does; input without an offset is local time.
+ * BAND rejects other shapes with an opaque `result_code=200`, so callers should
+ * fail fast on null.
+ */
+export function toApiTimestamp(raw: string): string | null {
+  const date = parseIso(raw);
+  return date ? date.toISOString().replace(/\.\d{3}Z$/, "Z") : null;
+}
+
 /** `Monday 3/11 @ 4pm` (or `4:30pm` when minutes are non-zero), in local time. */
 export function fmtLocal(date: Date): string {
   const day = date.toLocaleDateString("en-US", { weekday: "long" });

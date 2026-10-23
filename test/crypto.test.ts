@@ -23,3 +23,14 @@ describe("signPath", () => {
     expect(md).toBe("Boixu035eGFZs7dWcJxzoOkm/lt/oLZi51MG80NKDhA=");
   });
 });
+
+describe("importHmacKey base64url (JWT sessions)", () => {
+  it("decodes the secret as base64url bytes instead of UTF-8 text", async () => {
+    // "s3cr3t" base64url-encoded, no padding — must sign identically to the raw bytes.
+    const url = "https://api-usw.band.us/v1.6.0/get_schedules?band_no=42&ts=1700000000000";
+    const md = await signPath(await importHmacKey("czNjcjN0", undefined, "base64url"), url);
+    expect(md).toBe("Boixu035eGFZs7dWcJxzoOkm/lt/oLZi51MG80NKDhA=");
+    const asUtf8 = await signPath(await importHmacKey("czNjcjN0"), url);
+    expect(asUtf8).not.toBe(md);
+  });
+});

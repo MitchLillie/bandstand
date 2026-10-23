@@ -164,13 +164,17 @@ mode**: the runtime owns the cookie jar, so you only supply `secretKey` (read it
 `chrome.cookies`, since it's HttpOnly) and let `fetch` attach the session cookie.
 
 ```ts
-import { BandClient } from "bandstand/browser";
+import { BandClient, isJwtSession } from "bandstand/browser";
 
 const [{ value: secretKey }] = await chrome.cookies.getAll({ name: "secretKey" });
+const [{ value: band_session }] = await chrome.cookies.getAll({ name: "band_session" });
 const client = await BandClient.create({
   cookies: { secretKey },
   sendCookieHeader: false, // `Cookie` is a forbidden header in browsers
   credentials: "include",  // let the browser attach band.us session cookies
+  // JWT sessions sign with the base64url-decoded secretKey. Node auto-detects this
+  // from the jar; in browser mode band_session isn't in the jar, so say which it is.
+  jwtSession: isJwtSession({ band_session }),
 });
 await client.getCalendars(bandNo);
 ```

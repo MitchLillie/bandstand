@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractSecret,
+  isJwtSession,
   mergeSetCookies,
   parseCookieHeader,
   serializeCookieHeader,
@@ -51,5 +52,13 @@ describe("extractSecret", () => {
   });
   it("returns undefined when absent", () => {
     expect(extractSecret({ band_session: "x" })).toBeUndefined();
+  });
+});
+
+describe("isJwtSession", () => {
+  it("detects a three-part JWT band_session", () => {
+    expect(isJwtSession({ band_session: "eyJh.eyJw.sig" })).toBe(true);
+    expect(isJwtSession({ band_session: "opaque-token" })).toBe(false);
+    expect(isJwtSession({})).toBe(false);
   });
 });

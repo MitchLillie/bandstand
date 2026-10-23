@@ -18,6 +18,7 @@ export { AuthError, BandApiError } from "./errors";
 export {
   type CookieJar,
   extractSecret,
+  isJwtSession,
   mergeSetCookies,
   parseCookieHeader,
   serializeCookieHeader,

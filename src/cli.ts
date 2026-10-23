@@ -10,7 +10,7 @@ import { BandClient } from "./client";
 import { COOKIE_INSTRUCTIONS } from "./constants";
 import { parseCookieHeader } from "./cookies";
 import { AuthError, BandApiError } from "./errors";
-import { dateWindow, fmtLocal, parseIso, scheduleUrl } from "./format";
+import { dateWindow, fmtLocal, parseIso, scheduleUrl, toApiTimestamp } from "./format";
 import { FileCookieStore } from "./node/file-store";
 import { rsvpSummary } from "./rsvp";
 import { applySharerFlags, parseUserList, stripForCreate } from "./schedule";
@@ -295,6 +295,20 @@ async function cmdWeek(values: Values, _pos: string[], config: Config): Promise<
   }
 }
 
+/** `--start`/`--end` → BAND's timestamp form, or exit with a usable message. */
+function timeFlag(flag: string, raw: string): string {
+  return (
+    toApiTimestamp(raw) ??
+    fail(
+      `--${flag} '${raw}' isn't a date-time — use e.g. 2026-05-01T18:30 or 2026-05-01T18:30:00-0700`,
+    )
+  );
+}
+
+function optTimeFlag(flag: string, raw: string | undefined): string | undefined {
+  return raw === undefined ? undefined : timeFlag(flag, raw);
+}
+
 function buildScheduleFromFlags(values: Values, config: Config): Schedule {
   const name = str(values.name);
   const start = str(values.start);
@@ -303,8 +317,8 @@ function buildScheduleFromFlags(values: Values, config: Config): Schedule {
   const sched: Schedule = {
     name,
     description: str(values.desc) ?? "",
-    start_at: start,
-    end_at: end,
+    start_at: timeFlag("start", start),
+    end_at: timeFlag("end", end),
     is_all_day: false,
     is_lunar: false,
     is_secret: Boolean(values.secret),
@@ -362,8 +376,8 @@ async function cmdCopy(values: Values, positionals: string[], config: Config): P
     const overrides: Array<[keyof Schedule, string | undefined]> = [
       ["name", str(values.name)],
       ["description", str(values.desc)],
-      ["start_at", str(values.start)],
-      ["end_at", str(values.end)],
+      ["start_at", optTimeFlag("start", str(values.start))],
+      ["end_at", optTimeFlag("end", str(values.end))],
       ["schedule_time_zone_id", str(values.tz)],
     ];
     for (const [key, value] of overrides) if (value !== undefined) sched[key] = value;

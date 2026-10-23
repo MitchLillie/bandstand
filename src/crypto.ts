@@ -18,14 +18,28 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+function base64urlToBytes(value: string): Uint8Array<ArrayBuffer> {
+  const b64 = value.replaceAll("-", "+").replaceAll("_", "/");
+  const binary = atob(b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), "="));
+  return Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
+}
+
+/**
+ * How the `secretKey` string becomes HMAC key bytes. BandWebAuthModule's `makeMd`
+ * UTF-8-encodes it for legacy opaque sessions, but base64url-decodes it when the
+ * session is a JWT (`isJwtType: true` in the getKey bootstrap).
+ */
+export type SecretEncoding = "utf8" | "base64url";
+
 /** Import a `secretKey` value as an HMAC-SHA256 signing key (Web Crypto). */
 export function importHmacKey(
   secret: string,
   crypto: Crypto = globalThis.crypto,
+  encoding: SecretEncoding = "utf8",
 ): Promise<CryptoKey> {
   return crypto.subtle.importKey(
     "raw",
-    encoder.encode(secret),
+    encoding === "base64url" ? base64urlToBytes(secret) : encoder.encode(secret),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],

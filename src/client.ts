@@ -9,6 +9,7 @@ import {
 import {
   type CookieJar,
   extractSecret,
+  isJwtSession,
   mergeSetCookies,
   parseCookieHeader,
   serializeCookieHeader,
@@ -63,6 +64,12 @@ export interface BandClientOptions {
   sendCookieHeader?: boolean;
   /** `credentials` mode passed to `fetch` — e.g. `"include"` in a browser extension. */
   credentials?: RequestCredentials;
+  /**
+   * Whether the session is a JWT, which changes how `secretKey` is decoded for
+   * signing. Auto-detected from `band_session` when omitted; set it explicitly when
+   * `band_session` isn't in the jar (e.g. `sendCookieHeader: false`).
+   */
+  jwtSession?: boolean;
 }
 
 interface ResolvedConfig {
@@ -136,7 +143,8 @@ export class BandClient {
     }
 
     const crypto = options.crypto ?? globalThis.crypto;
-    const hmacKey = await importHmacKey(secret, crypto);
+    const jwt = options.jwtSession ?? isJwtSession(jar);
+    const hmacKey = await importHmacKey(secret, crypto, jwt ? "base64url" : "utf8");
     const cfg: ResolvedConfig = {
       store,
       // Bind the default global fetch to the global scope. Calling it detached
