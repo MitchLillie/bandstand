@@ -148,7 +148,8 @@ describe("mapLimit", () => {
 });
 
 // Real timers here: request signing awaits Web Crypto, which resolves outside the
-// fake-timer queue, so gaps are kept small and asserted with a little tolerance.
+// fake-timer queue, so gaps are kept small and asserted with tolerance. Times are
+// taken at fetch, after signing, so a gap can measure short by the signing jitter.
 describe("BandClient pacing", () => {
   const COOKIES = { band_session: "sess", secretKey: '"key"' };
   const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -184,10 +185,10 @@ describe("BandClient pacing", () => {
     ]);
 
     const [a, b, c, w] = log.map((l) => l.at) as [number, number, number, number];
-    expect(b - a).toBeGreaterThanOrEqual(40 - 2); // starts spaced by the read gap…
+    expect(b - a).toBeGreaterThanOrEqual(40 - SLACK); // starts spaced by the read gap…
     expect(b - a).toBeLessThan(100); // …but overlapping (a still in flight)
-    expect(c - a).toBeGreaterThanOrEqual(100 - 2); // 3rd read waits for a free slot
-    expect(w - c).toBeGreaterThanOrEqual(100 + 60 - 2); // write: after c completes + gap
+    expect(c - a).toBeGreaterThanOrEqual(100 - SLACK); // 3rd read waits for a free slot
+    expect(w - c).toBeGreaterThanOrEqual(100 + 60 - SLACK); // write: after c completes + gap
     expect(w - c).toBeLessThan(100 + 60 + SLACK * 2);
     expect(log[3]?.path).toBe("/v2.0.0/create_schedule");
   });
@@ -204,6 +205,6 @@ describe("BandClient pacing", () => {
       jitterMs: [80, 80],
     });
     await Promise.all([client.getCalendars(1), client.getCalendars(1)]);
-    expect((at[1] ?? 0) - (at[0] ?? 0)).toBeGreaterThanOrEqual(80 - 2);
+    expect((at[1] ?? 0) - (at[0] ?? 0)).toBeGreaterThanOrEqual(80 - SLACK);
   });
 });
