@@ -230,7 +230,9 @@ async function cmdLogin(values: Values): Promise<void> {
       onListening: ({ url }) => {
         console.error("bandstand login — waiting for your browser…");
         console.error(`  Opening ${url}`);
-        console.error('  On that tab, click the Band Tools icon → "Send BAND session to bandstand",');
+        console.error(
+          '  On that tab, click the Band Tools icon → "Send BAND session to bandstand",',
+        );
         console.error("  or use the bookmarklet on that page.");
         console.error("  (Ctrl-C to paste cookies from DevTools instead.)\n");
         openBrowser(url);
