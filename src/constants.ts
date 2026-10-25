@@ -16,8 +16,26 @@ export const BROWSER_UA =
 export const DEFAULT_TIME_ZONE_ID = "America/Los_Angeles";
 export const DEFAULT_TIME_ZONE_OFFSET_MS = -25_200_000;
 
-/** Inclusive [min, max] human-ish gap between API calls, in milliseconds. */
+/**
+ * Inclusive [min, max] human-ish gap before a write (create/update/delete/RSVP), in
+ * milliseconds, measured from the previous request's completion. Writes are the
+ * calls that map to a person clicking a button, so they stay slow.
+ */
 export const DEFAULT_JITTER_MS = [300, 900] as const;
+
+/**
+ * Inclusive [min, max] gap between the *starts* of consecutive reads, in ms. BAND's
+ * own web client fires several GETs within a few ms of each other when a calendar
+ * or event page loads, so a short, still-randomized spacing stays well inside what
+ * a real browser session looks like.
+ */
+export const DEFAULT_READ_JITTER_MS = [150, 400] as const;
+
+/** Max requests in flight at once (a browser tab opens ~6 connections per host). */
+export const DEFAULT_MAX_IN_FLIGHT = 3;
+
+/** Printed when a session has expired — the fix is always a fresh login. */
+export const SESSION_EXPIRED_HINT = "Session expired — run: bandstand login";
 
 export const COOKIE_INSTRUCTIONS = `BAND session is missing or expired. To grab a fresh one:
 

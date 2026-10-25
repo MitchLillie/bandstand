@@ -5,7 +5,29 @@ import {
   mergeSetCookies,
   parseCookieHeader,
   serializeCookieHeader,
+  sessionExpiresAt,
 } from "../src/cookies";
+
+describe("sessionExpiresAt", () => {
+  const jwt = (payload: unknown) =>
+    `eyJhbGciOiJSUzI1NiJ9.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.sig`;
+
+  it("reads a JWT band_session's exp claim, in ms", () => {
+    expect(sessionExpiresAt({ band_session: jwt({ exp: 1_792_961_500 }) })).toBe(1_792_961_500_000);
+  });
+
+  it("prefers the ai cookie's hex expiry, like the web client", () => {
+    const ai = `x,${(1_700_000_000_000).toString(16)}`;
+    expect(sessionExpiresAt({ band_session: jwt({ exp: 1 }), ai })).toBe(1_700_000_000_000);
+  });
+
+  it("is undefined for opaque tokens and unparseable JWTs", () => {
+    expect(sessionExpiresAt({ band_session: "opaque" })).toBeUndefined();
+    expect(sessionExpiresAt({ band_session: "a.%%%.c" })).toBeUndefined();
+    expect(sessionExpiresAt({ band_session: jwt({ sub: 1 }) })).toBeUndefined();
+    expect(sessionExpiresAt({})).toBeUndefined();
+  });
+});
 
 describe("parseCookieHeader", () => {
   it("parses a document.cookie string", () => {

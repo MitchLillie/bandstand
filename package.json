@@ -1,6 +1,6 @@
 {
   "name": "bandstand",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Unofficial TypeScript client + CLI for BAND (band.us) calendars — read and write schedules the official Developer API doesn't expose.",
   "type": "module",
   "license": "MIT",
@@ -10,7 +10,15 @@
     "type": "git",
     "url": "git+https://github.com/MitchLillie/bandstand.git"
   },
-  "keywords": ["band", "band.us", "calendar", "schedule", "cli", "bandstand", "unofficial"],
+  "keywords": [
+    "band",
+    "band.us",
+    "calendar",
+    "schedule",
+    "cli",
+    "bandstand",
+    "unofficial"
+  ],
   "engines": {
     "node": ">=20"
   },
@@ -31,7 +39,11 @@
       "import": "./dist/browser.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "sideEffects": false,
   "scripts": {
     "build": "tsup",
@@ -39,8 +51,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "smoke": "npm run build && node scripts/smoke.mjs",
     "lint": "biome check .",
     "format": "biome format --write .",
+    "check:band-web": "node scripts/check-band-web.mjs",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {

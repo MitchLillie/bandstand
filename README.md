@@ -19,9 +19,10 @@ Reverse-engineered from the web client:
 1. **Static `akey` header** (`bbc59b0b…`) identifies the web client. It's the same
    value for every user — a public identifier, not a secret.
 2. **`band_session` cookie** is an opaque session token from a real login at
-   `auth.band.us` (captcha/2FA/SSO — not worth scripting). You paste it once. The
-   server rotates it via `Set-Cookie` on API responses; the client persists the
-   rotation automatically, so it stays fresh on its own.
+   `auth.band.us` (captcha/2FA/SSO — not worth scripting). `bandstand login` grabs
+   it from your browser once (see below). The server rotates it via `Set-Cookie` on
+   API responses; the client persists the rotation automatically, so it stays fresh
+   on its own.
 3. **`secretKey` cookie _is_ the HMAC key.** Every request carries an `md` header:
 
    ```
@@ -30,7 +31,9 @@ Reverse-engineered from the web client:
 
    where `extractPath(url)` is the URL minus `scheme://host`. `secretKey` is
    **HttpOnly**, scoped to path `/s/login/`, so it is **not** visible to
-   `document.cookie` — you must copy it from the DevTools cookies panel (see below).
+   `document.cookie`. `bandstand login` gets it either from the Band Tools
+   extension (`chrome.cookies`) or from BAND's `auth.band.us/s/login/getKey` JSONP,
+   which echoes the cookie back to same-site page scripts.
 
 ## Install
 
@@ -58,23 +61,38 @@ npm install bandstand
 bandstand login
 ```
 
-This opens `https://www.band.us/`. Then, in DevTools:
+`bandstand login` starts a one-shot listener on `127.0.0.1:7238` and opens a small
+landing page. The browser hands the session over from there — you never touch
+DevTools. Two ways in:
 
-**Application → Cookies → https://www.band.us**, copy the **values** of two cookies:
+- **Band Tools extension** (recommended, v0.3.0+): with the landing page open, click
+  the Band Tools toolbar icon, then **Send BAND session to bandstand**. The extension
+  reads `band_session` + `secretKey` via `chrome.cookies` and posts them to the
+  listener with the one-time pairing nonce from the page's URL, so the CLI saves
+  them without asking. (Be signed in to band.us in that browser first.)
+- **Bookmarklet** (no extension): drag the "bandstand login" link from the landing
+  page to your bookmarks bar, then click it on `band.us`. It reads `band_session`
+  from `document.cookie` and pulls the HttpOnly `secretKey` out of BAND's own
+  `getKey` JSONP, then posts both. The terminal shows a fingerprint to confirm
+  before saving.
+  `bandstand login --print-bookmarklet` prints the source if you'd rather add it by
+  hand.
 
-- `band_session`
-- `secretKey` — **HttpOnly**, so `copy(document.cookie)` in the Console silently
-  misses it. Grab it from the cookies panel.
+Cookies are saved to `~/.band_session.json` (mode `600`). Nothing leaves your
+machine except the POST to `127.0.0.1`.
 
-Paste them when prompted, in either form:
+**Flags:**
 
-```
-band_session=<value>; secretKey=<value>
-```
+| Flag | Effect |
+| ---- | ------ |
+| `--port <n>` | Use a different loopback port. Band Tools follows automatically; the bookmarklet has the port baked in, so re-drag it from the landing page. |
+| `--paste` | Skip the listener; paste `band_session=<value>; secretKey=<value>` copied from DevTools → Application → Cookies. `secretKey` is HttpOnly, so `copy(document.cookie)` misses it — grab it from the cookies panel. Wrapping quotes are fine. |
+| `--session '<pair>'` | Non-interactive: pass the pair directly (CI, scripts). |
 
 Quotes around `secretKey`'s value are fine — they're stripped. Cookies are saved to
-`~/.band_session.json` (mode `600`). If a command later hits auth, it re-prompts and
-retries once.
+`~/.band_session.json` (mode `600`). A session lasts about 40 hours after BAND's web
+page last renewed it. BAND won't renew it from outside the browser, so once it
+expires, commands exit with `Session expired — run: bandstand login`.
 
 ## CLI
 
@@ -150,7 +168,9 @@ is injectable for testing or alternate runtimes:
 const client = await BandClient.create({
   cookies: "band_session=…; secretKey=…", // seed instead of a store
   fetch: myImpersonatingFetch,            // swap the transport (see below)
-  jitterMs: [500, 1500],                  // or null to disable pacing
+  jitterMs: [500, 1500],                  // gap before writes; null disables pacing
+  readJitterMs: [200, 500],               // gap between read starts (default 150–400)
+  maxInFlight: 2,                         // concurrent requests (default 3)
   warmUp: false,
 });
 ```
@@ -184,7 +204,9 @@ await client.getCalendars(bandNo);
 To look like a normal browser to BAND, the client:
 
 - sends a browser **User-Agent**, `Origin`/`Referer`, and BAND's app headers;
-- **paces** calls with 300–900 ms jitter (configurable via `jitterMs`);
+- **paces** calls through a FIFO gate: reads start 150–400 ms apart with at most 3
+  in flight (like a page firing a few XHRs; `readJitterMs`, `maxInFlight`), while
+  writes run alone, 300–900 ms after the previous request finishes (`jitterMs`);
 - **warms up** before the first write with `touch_band_access` + `get_calendars`,
   the same sequence the calendar page loads;
 - persists the **full cookie jar** and any server-rotated cookies.
@@ -223,6 +245,34 @@ All under `https://api-usw.band.us`. Other region shards (`api-ukw`, `api-jpw`,
 `api-krw`) exist if your account is routed elsewhere — override with the `apiBase`
 option.
 
+## Watching for BAND web changes
+
+BAND can change its web signing code without warning. The 2026-10-21 deploy started
+base64url-decoding the `secretKey` for JWT sessions, and every call failed with
+`result_code 300`. `scripts/check-band-web.mjs` is an early-warning check for that kind of
+change. It fetches the public web client with no cookies and no login (about 7 GETs),
+pulls out the code bandstand mirrors, and compares it to `scripts/band-web-baseline.json`:
+
+- `BandWebAuthModule` (`makeMd`, the constructor, `needTokenRenewal`, `parseJwtToken`, `now`)
+  and the auth-module hash and file list from the `getKey` bootstrap
+- `createMd`, `extractPath`, the `md` header hook, the getKey loader, `prepareAuth`, and the
+  API host config in `boot.bundle.js`
+- the versions the web client uses for every endpoint in `src/client.ts`
+
+Code is compared by a hash taken after normalization (comments, whitespace and local
+identifier names are stripped), so a minifier rename or a new deploy id on its own does
+not alert.
+
+```bash
+npm run check:band-web               # exit 0 = no relevant change, 1 = change, 2 = error
+npm run check:band-web -- --update   # accept the current state as the new baseline
+```
+
+`.github/workflows/band-web-watch.yml` runs this every day. When it finds a change, it opens
+a single issue labelled `band-web-change`, and it only updates that issue when the diff
+itself changes. To resolve it, fix bandstand if needed, run `--update`, commit the
+baseline, and close the issue.
+
 ## Development
 
 ```bash
@@ -231,6 +281,31 @@ npm test            # vitest
 npm run build       # tsup -> dist/ (ESM + .d.ts)
 npm run lint        # biome
 ```
+
+### Smoke test (live, read-only)
+
+The unit tests mock `fetch`, so they can't catch BAND changing its request signing.
+`npm run smoke` builds the package and then makes about 7 read-only calls against the
+real API with your saved session: `get_calendars`, whoami, member groups, one group's
+roster, the next 14 days of schedules on the default calendar and on one non-default
+calendar (this one sends the JSON `calendars` param), and the detail of one event. It
+prints one line per check with its timing and exits 1 if any check fails.
+
+```bash
+npm run smoke                     # uses ~/.band_session.json + ~/.band_config.json
+npm run smoke -- --band 12345     # override band_no
+npm run smoke -- --json           # machine-readable
+BAND_STATE=/path/jar.json npm run smoke
+```
+
+Each failure gets a classification: missing or expired session (run
+`bandstand login`), `result_code 300` (signature/auth: either the session is dead or
+`md` signing no longer matches the web client's `makeMd`), `251`/`200` (a param is
+missing or invalid), or network. The output also says whether `band_session` is a JWT
+and when it expires. Cookie values are never printed, and the session file is never
+written: if the server rotates cookies during the run, the new values stay in memory.
+
+It is **not** part of `npm test` or CI because it needs a real logged-in session.
 
 ### Releasing
 

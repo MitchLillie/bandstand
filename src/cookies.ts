@@ -62,3 +62,35 @@ export function extractSecret(jar: CookieJar): string | undefined {
 export function isJwtSession(jar: CookieJar): boolean {
   return jar.band_session?.split(".").length === 3;
 }
+
+function decodeJwtPayload(token: string): Record<string, unknown> | undefined {
+  const part = token.split(".")[1];
+  if (!part) return undefined;
+  try {
+    const b64 = part.replaceAll("-", "+").replaceAll("_", "/");
+    const binary = atob(b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), "="));
+    const json = new TextDecoder().decode(Uint8Array.from(binary, (ch) => ch.charCodeAt(0)));
+    const payload: unknown = JSON.parse(json);
+    return payload && typeof payload === "object"
+      ? (payload as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * When the session expires, in ms since the epoch — or `undefined` if unknown
+ * (opaque token and no `ai` cookie). Mirrors `needTokenRenewal` in BandWebAuthModule:
+ * the `ai` cookie (`<x>,<hex ms>`) wins when present, else the JWT's `exp` claim.
+ */
+export function sessionExpiresAt(jar: CookieJar): number | undefined {
+  const ai = jar.ai?.split(",")[1];
+  if (ai) {
+    const ms = Number.parseInt(ai, 16);
+    if (Number.isFinite(ms)) return ms;
+  }
+  if (!isJwtSession(jar)) return undefined;
+  const exp = decodeJwtPayload(jar.band_session ?? "")?.exp;
+  return typeof exp === "number" ? exp * 1000 : undefined;
+}

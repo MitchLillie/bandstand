@@ -2,3 +2,11 @@
 // cookie store. Browser/edge consumers should import from "bandstand/browser".
 export * from "./browser";
 export { DEFAULT_STATE_PATH, FileCookieStore } from "./node/file-store";
+export {
+  bookmarkletSource,
+  DEFAULT_LOGIN_PORT,
+  type LoopbackLoginOptions,
+  type LoopbackLoginResult,
+  LoginTimeoutError,
+  receiveSessionViaLoopback,
+} from "./node/login-server";

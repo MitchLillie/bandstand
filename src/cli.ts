@@ -9,9 +9,17 @@ import { parseArgs } from "node:util";
 import { BandClient } from "./client";
 import { COOKIE_INSTRUCTIONS } from "./constants";
 import { parseCookieHeader } from "./cookies";
-import { AuthError, BandApiError } from "./errors";
+import { AuthError, BandApiError, authFailureMessage } from "./errors";
 import { dateWindow, fmtLocal, parseIso, scheduleUrl, toApiTimestamp } from "./format";
 import { FileCookieStore } from "./node/file-store";
+import {
+  DEFAULT_LOGIN_PORT,
+  LoginTimeoutError,
+  type LoopbackLoginResult,
+  bookmarkletSource,
+  receiveSessionViaLoopback,
+} from "./node/login-server";
+import { mapLimit } from "./pacing";
 import { rsvpSummary } from "./rsvp";
 import { applySharerFlags, parseUserList, stripForCreate } from "./schedule";
 import type { CalendarRef, Member, MembersResult, RsvpState, Schedule } from "./types";
@@ -101,43 +109,17 @@ async function saveCookies(store: FileCookieStore, raw: string): Promise<void> {
   await store.save(jar);
 }
 
-async function reprompt(store: FileCookieStore, err: AuthError): Promise<void> {
-  console.error(`\n[auth] ${err.message}`);
-  console.error(COOKIE_INSTRUCTIONS);
-  openBrowser("https://www.band.us/");
-  const raw = await promptCookie();
-  if (!raw) fail("aborted");
-  await saveCookies(store, raw);
-}
-
 /**
- * Run an operation with a freshly loaded client. If auth fails — either at
- * construction or mid-call — and we're on a TTY, reprompt for cookies and retry once.
- * Every command goes through here, so reads and writes get identical handling.
+ * Run an operation with a freshly loaded client. If auth fails — at construction
+ * or mid-call — exit with a short "run: bandstand login" rather than the DevTools
+ * walkthrough. Every command goes through here, so reads and writes get identical
+ * handling.
  */
 async function run<T>(fn: (client: BandClient) => Promise<T>): Promise<T> {
-  const store = new FileCookieStore();
-  let client: BandClient;
   try {
-    client = await BandClient.create({ store });
+    return await fn(await BandClient.create({ store: new FileCookieStore() }));
   } catch (err) {
-    if (err instanceof AuthError && process.stdin.isTTY) {
-      await reprompt(store, err);
-      client = await BandClient.create({ store });
-    } else if (err instanceof AuthError) {
-      fail(`auth failed: ${err.message}\n\n${COOKIE_INSTRUCTIONS}`);
-    } else {
-      throw err;
-    }
-  }
-
-  try {
-    return await fn(client);
-  } catch (err) {
-    if (err instanceof AuthError && process.stdin.isTTY) {
-      await reprompt(store, err);
-      return fn(await BandClient.create({ store }));
-    }
+    if (err instanceof AuthError) fail(authFailureMessage(err));
     throw err;
   }
 }
@@ -177,21 +159,106 @@ async function saveConfigMe(userNo: number): Promise<void> {
 
 // ---- commands ----
 
-async function cmdLogin(values: Values): Promise<void> {
-  const store = new FileCookieStore();
-  let raw = str(values.session);
-  if (!raw) {
-    console.error(COOKIE_INSTRUCTIONS);
-    openBrowser("https://www.band.us/");
-    raw = await promptCookie();
-  }
-  if (!raw) fail("aborted");
-  await saveCookies(store, raw);
+/** Construct a client from the saved jar and print the confirmation line. */
+async function finishLogin(store: FileCookieStore): Promise<void> {
   const client = await BandClient.create({ store });
   const names = client.cookieNames();
   console.log(
     `ok — saved ${names.length} cookies; secretKey present: ${names.includes("secretKey")}.`,
   );
+}
+
+/** `****…abcdef (len 42)` — enough to eyeball a value without revealing it. */
+function fingerprint(value: string): string {
+  return `****…${value.slice(-6)} (len ${value.length})`;
+}
+
+async function confirmReceived(result: LoopbackLoginResult): Promise<boolean> {
+  console.error("\nReceived a session from your browser:");
+  console.error(`  band_session  ${fingerprint(result.jar.band_session ?? "")}`);
+  console.error(`  secretKey     ${fingerprint(result.jar.secretKey ?? "")}`);
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+  try {
+    const answer = (await rl.question("Save these? [y/N] ")).trim().toLowerCase();
+    return answer === "y" || answer === "yes";
+  } finally {
+    rl.close();
+  }
+}
+
+/** Interactive DevTools-copy fallback (also reachable with `--paste`). */
+async function pasteLogin(store: FileCookieStore): Promise<void> {
+  console.error(COOKIE_INSTRUCTIONS);
+  openBrowser("https://www.band.us/");
+  const raw = await promptCookie();
+  if (!raw) fail("aborted");
+  await saveCookies(store, raw);
+  await finishLogin(store);
+}
+
+async function cmdLogin(values: Values): Promise<void> {
+  const store = new FileCookieStore();
+
+  const raw = str(values.session);
+  if (raw) {
+    await saveCookies(store, raw);
+    await finishLogin(store);
+    return;
+  }
+
+  const port = num(values.port) ?? DEFAULT_LOGIN_PORT;
+
+  if (values["print-bookmarklet"]) {
+    console.log(bookmarkletSource(port));
+    return;
+  }
+
+  if (values.paste) {
+    await pasteLogin(store);
+    return;
+  }
+
+  // Default: spin up the loopback receiver and let the browser hand the session
+  // over (Band Tools extension, or the bookmarklet on the landing page).
+  const ac = new AbortController();
+  const onSigint = () => ac.abort();
+  process.on("SIGINT", onSigint);
+  try {
+    const result = await receiveSessionViaLoopback({
+      port,
+      signal: ac.signal,
+      onListening: ({ url }) => {
+        console.error("bandstand login — waiting for your browser…");
+        console.error(`  Opening ${url}`);
+        console.error('  On that tab, click the Band Tools icon → "Send BAND session to bandstand",');
+        console.error("  or use the bookmarklet on that page.");
+        console.error("  (Ctrl-C to paste cookies from DevTools instead.)\n");
+        openBrowser(url);
+      },
+    });
+
+    if (result.trusted) {
+      console.error("Received a session from Band Tools (pairing nonce verified).");
+    } else if (!(await confirmReceived(result))) {
+      fail("declined — nothing saved");
+    }
+    await store.save(result.jar);
+    await finishLogin(store);
+  } catch (err) {
+    if (err instanceof LoginTimeoutError) {
+      console.error(`\n[${err.message}] falling back to manual paste.\n`);
+      await pasteLogin(store);
+      return;
+    }
+    if (err instanceof Error && /EADDRINUSE/.test(err.message)) {
+      fail(
+        `port ${port} is already in use — pass \`--port <n>\` (Band Tools follows automatically; re-drag the bookmarklet from the new page), or run \`bandstand login --paste\`.`,
+      );
+    }
+    throw err;
+  } finally {
+    process.off("SIGINT", onSigint);
+  }
 }
 
 async function cmdCalendars(values: Values, _pos: string[], config: Config): Promise<void> {
@@ -414,6 +481,9 @@ async function cmdDelete(values: Values, positionals: string[], config: Config):
   });
 }
 
+/** Parallel `get_schedule` fetches in sync-group (bounded further by the client). */
+const SYNC_FETCH_CONCURRENCY = 3;
+
 async function cmdSyncGroup(values: Values, _pos: string[], config: Config): Promise<void> {
   const band = requireBand(values, config);
   const calendar = num(values.calendar) ?? config.calendar;
@@ -422,8 +492,15 @@ async function cmdSyncGroup(values: Values, _pos: string[], config: Config): Pro
   if (!groupId) fail("--group <member_group_id> required");
   const days = num(values.days) ?? 120;
 
+  const { start, end } = dateWindow(str(values.start), str(values.end), days);
   await run(async (c) => {
-    const groupData = await c.getGroupMembers(band, groupId);
+    // Roster and event list are independent — fetch them together.
+    const [groupData, data] = await Promise.all([
+      c.getGroupMembers(band, groupId),
+      c.getSchedules(band, start, end, {
+        calendars: [{ is_default: false, calendar_id: calendar }],
+      }),
+    ]);
     const groupNames = new Map<number, string>();
     for (const m of membersOf(groupData)) {
       if (m.user_no) groupNames.set(m.user_no, m.name ?? "");
@@ -432,11 +509,6 @@ async function cmdSyncGroup(values: Values, _pos: string[], config: Config): Pro
     if (config.me) groupNames.delete(config.me);
     const gids = new Set(groupNames.keys());
     console.log(`group ${groupId}: ${gids.size} members`);
-
-    const { start, end } = dateWindow(str(values.start), str(values.end), days);
-    const data = await c.getSchedules(band, start, end, {
-      calendars: [{ is_default: false, calendar_id: calendar }],
-    });
 
     // Dedupe recurring series by schedule_no (3rd "/"-segment); update_schedule with
     // recurring_edit_type=ALL hits every occurrence of a series in one call.
@@ -451,9 +523,15 @@ async function cmdSyncGroup(values: Values, _pos: string[], config: Config): Pro
       `found ${seen.size} unique events in calendar ${calendar} between ${start} and ${end}`,
     );
 
+    // Fetch event details a few at a time (the client still paces request starts),
+    // then report in calendar order.
+    const previews = [...seen.values()];
+    const fulls = await mapLimit(previews, SYNC_FETCH_CONCURRENCY, (preview) =>
+      c.getSchedule(band, preview.schedule_id ?? ""),
+    );
     const updates: Array<{ full: Schedule; missing: number[] }> = [];
-    for (const preview of seen.values()) {
-      const full = await c.getSchedule(band, preview.schedule_id ?? "");
+    for (const [i, preview] of previews.entries()) {
+      const full = fulls[i] as Schedule;
       if (!full.is_secret) {
         console.log(`  skip (public): ${preview.schedule_id}  ${(full.name ?? "").slice(0, 60)}`);
         continue;
@@ -561,8 +639,15 @@ async function cmdRsvpReport(values: Values, positionals: string[], config: Conf
 
 const COMMANDS: Record<string, Command> = {
   login: {
-    summary: "save BAND cookies (interactive if --session omitted)",
-    options: { session: { type: "string" } },
+    summary: "save BAND cookies via the browser (--paste for the DevTools way)",
+    usage:
+      "bandstand login [--paste] [--port N] [--session 'band_session=…; secretKey=…'] [--print-bookmarklet]",
+    options: {
+      session: { type: "string" },
+      paste: { type: "boolean" },
+      port: { type: "string" },
+      "print-bookmarklet": { type: "boolean" },
+    },
     run: (v) => cmdLogin(v),
   },
   calendars: {
@@ -738,7 +823,7 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   if (err instanceof AuthError) {
-    fail(`\n[auth] ${err.message}\n\n${COOKIE_INSTRUCTIONS}`);
+    fail(authFailureMessage(err));
   }
   if (err instanceof BandApiError) {
     fail(`error: ${err.message}`);

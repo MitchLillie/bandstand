@@ -1,0 +1,78 @@
+name: BAND web watch
+
+# Daily early warning for changes to BAND's web auth/signing code (makeMd, createMd,
+# extractPath, getKey bootstrap, endpoint versions). See scripts/check-band-web.mjs.
+# On a relevant change it opens ONE issue labelled `band-web-change`, and afterwards only
+# updates it when the detected diff itself changes — no daily spam.
+on:
+  schedule:
+    - cron: "17 6 * * *" # daily, 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: band-web-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      # No npm install needed: the script is plain Node with no dependencies.
+      - name: Check BAND web client against baseline
+        id: check
+        run: |
+          set +e
+          node scripts/check-band-web.mjs --report band-web-report.md
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          cat band-web-report.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          exit 0
+
+      - name: Open or update the watch issue
+        if: steps.check.outputs.exit_code != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXIT_CODE: ${{ steps.check.outputs.exit_code }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          label=band-web-change
+          gh label create "$label" --color D93F0B \
+            --description "BAND web auth/signing code changed (scripts/check-band-web.mjs)" \
+            2>/dev/null || true
+
+          if [ "$EXIT_CODE" = "1" ]; then
+            title="BAND web client changed (auth/signing or endpoints)"
+          else
+            title="BAND web watch failed (fetch error or page structure changed)"
+          fi
+          { cat band-web-report.md; echo; echo "_Last detected by [this run]($RUN_URL)._"; } > body.md
+          fingerprint=$(grep -o 'band-web-diff-fingerprint: [0-9a-f]*' band-web-report.md || true)
+
+          number=$(gh issue list --label "$label" --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -z "$number" ]; then
+            gh issue create --title "$title" --label "$label" --body-file body.md
+            exit 0
+          fi
+
+          current=$(gh issue view "$number" --json body --jq .body)
+          if [ -n "$fingerprint" ] && printf '%s' "$current" | grep -qF "$fingerprint"; then
+            echo "Issue #$number already describes this diff; nothing to do."
+            exit 0
+          fi
+          if [ -z "$fingerprint" ] && [ "$EXIT_CODE" = "2" ] && printf '%s' "$current" | grep -qF "BAND web watch:"; then
+            echo "Issue #$number already reports a watch failure; not re-posting."
+            exit 0
+          fi
+          gh issue edit "$number" --title "$title" --body-file body.md
+          gh issue comment "$number" --body "The detected change is different from before; issue body updated ($RUN_URL)."

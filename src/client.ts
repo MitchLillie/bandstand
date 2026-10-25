@@ -3,6 +3,8 @@ import {
   DEFAULT_AKEY,
   DEFAULT_API_BASE,
   DEFAULT_JITTER_MS,
+  DEFAULT_MAX_IN_FLIGHT,
+  DEFAULT_READ_JITTER_MS,
   DEFAULT_TIME_ZONE_ID,
   DEFAULT_TIME_ZONE_OFFSET_MS,
 } from "./constants";
@@ -13,9 +15,11 @@ import {
   mergeSetCookies,
   parseCookieHeader,
   serializeCookieHeader,
+  sessionExpiresAt,
 } from "./cookies";
 import { importHmacKey, signPath } from "./crypto";
-import { AuthError, BandApiError } from "./errors";
+import { AuthError, BandApiError, SessionExpiredError } from "./errors";
+import { Pacer } from "./pacing";
 import { type CookieStore, MemoryCookieStore } from "./store";
 import type {
   BandApiResponse,
@@ -47,8 +51,20 @@ export interface BandClientOptions {
   akey?: string;
   timeZoneId?: string;
   timeZoneOffsetMs?: number;
-  /** Inclusive [min, max] ms gap between calls; `null` disables pacing. */
+  /**
+   * Inclusive [min, max] ms gap before each write, measured from the previous
+   * request's completion; `null` disables pacing (for reads too, unless
+   * {@link readJitterMs} is set).
+   */
   jitterMs?: readonly [number, number] | null;
+  /**
+   * Inclusive [min, max] ms gap between the starts of consecutive reads; `null`
+   * disables it. Defaults to `[150, 400]` — or to {@link jitterMs} when that is set
+   * explicitly, so a caller who slowed writes down gets slow reads too.
+   */
+  readJitterMs?: readonly [number, number] | null;
+  /** Max requests in flight at once (writes always run alone). Default 3. */
+  maxInFlight?: number;
   /** Run the calendar-page warm-up before the first write. Default true. */
   warmUp?: boolean;
   /** Injectable clock (ms). Defaults to `Date.now`. */
@@ -81,14 +97,23 @@ interface ResolvedConfig {
   timeZoneId: string;
   timeZoneOffsetMs: number;
   jitterMs: readonly [number, number] | null;
+  readJitterMs: readonly [number, number] | null;
   warmUp: boolean;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
   sendCookieHeader: boolean;
   credentials: RequestCredentials | undefined;
+  jwtSession: boolean | undefined;
 }
 
 const AUTH_HINTS = ["auth", "login", "session", "token", "unauth"];
+
+/**
+ * BAND's wording when a session has aged out, e.g. result_code 300 "Your previous
+ * session is expired as 4 hours passed after sign in. Please log in again …".
+ * Plain "You are not authorized." (a bad signature) deliberately doesn't match.
+ */
+const EXPIRED_HINTS = ["expired", "log in again"];
 
 type Primitive = string | number | boolean;
 
@@ -111,16 +136,22 @@ function readSetCookies(headers: Headers): string[] {
  */
 export class BandClient {
   private readonly cfg: ResolvedConfig;
-  private readonly hmacKey: CryptoKey;
+  private hmacKey: CryptoKey;
   private jar: CookieJar;
-  private lastCallAt = 0;
+  private readonly pacer: Pacer;
   private warmed = false;
   private referer = "https://www.band.us/";
 
-  private constructor(cfg: ResolvedConfig, hmacKey: CryptoKey, jar: CookieJar) {
+  private constructor(
+    cfg: ResolvedConfig,
+    hmacKey: CryptoKey,
+    jar: CookieJar,
+    maxInFlight: number,
+  ) {
     this.cfg = cfg;
     this.hmacKey = hmacKey;
     this.jar = jar;
+    this.pacer = new Pacer({ maxInFlight, now: cfg.now, sleep: cfg.sleep });
   }
 
   static async create(options: BandClientOptions = {}): Promise<BandClient> {
@@ -157,15 +188,22 @@ export class BandClient {
       timeZoneId: options.timeZoneId ?? DEFAULT_TIME_ZONE_ID,
       timeZoneOffsetMs: options.timeZoneOffsetMs ?? DEFAULT_TIME_ZONE_OFFSET_MS,
       jitterMs: options.jitterMs === undefined ? DEFAULT_JITTER_MS : options.jitterMs,
+      readJitterMs:
+        options.readJitterMs !== undefined
+          ? options.readJitterMs
+          : options.jitterMs !== undefined
+            ? options.jitterMs
+            : DEFAULT_READ_JITTER_MS,
       warmUp: options.warmUp ?? true,
       now: options.now ?? Date.now,
       sleep: options.sleep ?? defaultSleep,
       sendCookieHeader,
       credentials: options.credentials,
+      jwtSession: options.jwtSession,
     };
 
     await store.save(jar);
-    return new BandClient(cfg, hmacKey, jar);
+    return new BandClient(cfg, hmacKey, jar, options.maxInFlight ?? DEFAULT_MAX_IN_FLIGHT);
   }
 
   /** Names of the cookies currently in the jar (no values). */
@@ -173,15 +211,26 @@ export class BandClient {
     return Object.keys(this.jar);
   }
 
-  // ---- pacing / warm-up ----
-
-  private async jitter(): Promise<void> {
-    if (!this.cfg.jitterMs || this.lastCallAt === 0) return;
-    const [min, max] = this.cfg.jitterMs;
-    const elapsed = this.cfg.now() - this.lastCallAt;
-    const target = min + Math.random() * (max - min);
-    if (elapsed < target) await this.cfg.sleep(target - elapsed);
+  /** When the session expires (ms since epoch), if knowable from the jar. */
+  sessionExpiresAt(): number | undefined {
+    return sessionExpiresAt(this.jar);
   }
+
+  // ---- session expiry ----
+
+  /**
+   * Refuse to send a request we already know will bounce. BAND's refresh endpoint
+   * won't renew a session from outside the browser, so an expired one needs a fresh
+   * login.
+   */
+  private assertSessionLive(): void {
+    const exp = sessionExpiresAt(this.jar);
+    if (exp !== undefined && this.cfg.now() >= exp) {
+      throw new SessionExpiredError(`session expired at ${new Date(exp).toISOString()}`);
+    }
+  }
+
+  // ---- pacing / warm-up ----
 
   /** Mimic a calendar-page visit before the first write. Best-effort. */
   private async warmUp(bandNo: number): Promise<void> {
@@ -212,10 +261,30 @@ export class BandClient {
   private async call<T>(
     method: "GET" | "POST",
     path: string,
-    opts: { params?: Record<string, Primitive>; body?: Record<string, Primitive> } = {},
+    opts: {
+      params?: Record<string, Primitive>;
+      body?: Record<string, Primitive>;
+      /** Pace as a write. Defaults to true for POST (delete_schedule is a GET write). */
+      write?: boolean;
+    } = {},
   ): Promise<T> {
-    await this.jitter();
+    this.assertSessionLive();
+    const write = opts.write ?? method === "POST";
+    const release = await this.pacer.acquire(write ? this.cfg.jitterMs : this.cfg.readJitterMs, {
+      exclusive: write,
+    });
+    try {
+      return await this.send<T>(method, path, opts);
+    } finally {
+      release();
+    }
+  }
 
+  private async send<T>(
+    method: "GET" | "POST",
+    path: string,
+    opts: { params?: Record<string, Primitive>; body?: Record<string, Primitive> },
+  ): Promise<T> {
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(opts.params ?? {})) params.set(key, String(value));
     params.set("ts", String(this.cfg.now()));
@@ -239,7 +308,6 @@ export class BandClient {
     }
 
     const res = await this.cfg.fetchImpl(url, init);
-    this.lastCallAt = this.cfg.now();
 
     // Persist any server-rotated cookies (band_session, ai, …).
     if (mergeSetCookies(this.jar, readSetCookies(res.headers))) {
@@ -257,6 +325,9 @@ export class BandClient {
     const json = (await res.json()) as BandApiResponse<T>;
     if (json.result_code !== 1) {
       const blob = JSON.stringify(json).toLowerCase();
+      if (json.result_code === 300 && EXPIRED_HINTS.some((hint) => blob.includes(hint))) {
+        throw new SessionExpiredError(`API session expired: ${JSON.stringify(json)}`);
+      }
       if (AUTH_HINTS.some((hint) => blob.includes(hint))) {
         throw new AuthError(`API auth error: ${JSON.stringify(json)}`);
       }
@@ -383,6 +454,7 @@ export class BandClient {
   ): Promise<DeleteScheduleResult> {
     this.referer = `https://www.band.us/band/${bandNo}/calendar`;
     return this.call("GET", "/v1/schedule/delete_schedule", {
+      write: true,
       params: {
         band_no: bandNo,
         schedule_id: scheduleId,
